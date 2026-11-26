@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "batch": "qwen-measured-01",
+  "mode": "live",
+  "seed": 42,
+  "fixture_repeats": 8,
+  "fixture_digest": "a71875b2705602b986b13d520be17771bf88ea1d076b75dc61c39f4530ccf91a",
+  "limits": {
+    "model_calls": 6,
+    "tool_calls": 8
+  },
+  "thresholds": {
+    "minimum_per_arm": 10,
+    "minimum_gain_points": 5,
+    "max_latency_ratio": 1.5,
+    "max_token_ratio": 1.5
+  },
+  "model": "qwen2.5-3b-instruct",
+  "environment": "31322fa41797ed07b3c0ea99728dbb8544539b80da94806702d2ae6818f0afc5",
+  "runs": [
+    {
+      "identity": "qwen-measured-01-0001",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0002",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0003",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0004",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0005",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0006",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0007",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0008",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0009",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0010",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0011",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0012",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0013",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0014",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0015",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0016",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0017",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0018",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0019",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0020",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0021",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0022",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0023",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0024",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0025",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0026",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0027",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0028",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0029",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0030",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0031",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0032",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0033",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0034",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0035",
+      "case": "mixed-symptoms",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0036",
+      "case": "already-routed",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0037",
+      "case": "password-reset",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0038",
+      "case": "unclear",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0039",
+      "case": "duplicate-charge",
+      "strategy": null
+    },
+    {
+      "identity": "qwen-measured-01-0040",
+      "case": "unclear",
+      "strategy": null
+    }
+  ],
+  "provider": "lmstudio",
+  "lmstudio_origin": "http://127.0.0.1:1234",
+  "model_digest": "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
+  "lmstudio_options": {
+    "temperature": 0,
+    "max_tokens": 512
+  }
+}

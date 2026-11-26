@@ -1,0 +1,102 @@
+{
+  "decision": "hold",
+  "reason": "Keep direct in Development. Dashboard counts matched the ledger. The candidate missed the frozen success-gain target by 35 percentage points. Trace qwen-measured-01-0005 shows assignment before the required knowledge-base lookup.",
+  "review": {
+    "batch": "qwen-measured-01",
+    "mode": "live",
+    "manifest_id": "918f7857ef03221a9187db09a5e8f2037b8ae3d1655bed6ef95729bf9c746554",
+    "provider": "lmstudio",
+    "model": "qwen2.5-3b-instruct",
+    "recommendation": "hold",
+    "reasons": [
+      "Fixture-adjusted success gain is below the frozen target."
+    ],
+    "thresholds": {
+      "minimum_per_arm": 10,
+      "minimum_gain_points": 5,
+      "max_latency_ratio": 1.5,
+      "max_token_ratio": 1.5
+    },
+    "arms": {
+      "direct": {
+        "assigned": 19,
+        "evaluated": 19,
+        "successful": 19,
+        "blocked_calls": 0,
+        "invalid_calls": 0,
+        "by_fixture": {
+          "already-routed": {
+            "evaluated": 4,
+            "successful": 4
+          },
+          "mixed-symptoms": {
+            "evaluated": 4,
+            "successful": 4
+          },
+          "password-reset": {
+            "evaluated": 5,
+            "successful": 5
+          },
+          "duplicate-charge": {
+            "evaluated": 4,
+            "successful": 4
+          },
+          "unclear": {
+            "evaluated": 2,
+            "successful": 2
+          }
+        },
+        "success_rate": 1.0,
+        "median_latency_ms": 1781.0,
+        "median_tokens": 1549,
+        "token_coverage": 19
+      },
+      "plan_validate": {
+        "assigned": 21,
+        "evaluated": 21,
+        "successful": 15,
+        "blocked_calls": 0,
+        "invalid_calls": 0,
+        "by_fixture": {
+          "duplicate-charge": {
+            "evaluated": 4,
+            "successful": 4
+          },
+          "password-reset": {
+            "evaluated": 3,
+            "successful": 0
+          },
+          "already-routed": {
+            "evaluated": 4,
+            "successful": 4
+          },
+          "mixed-symptoms": {
+            "evaluated": 4,
+            "successful": 4
+          },
+          "unclear": {
+            "evaluated": 6,
+            "successful": 3
+          }
+        },
+        "success_rate": 0.7142857142857143,
+        "median_latency_ms": 2578.0,
+        "median_tokens": 2001,
+        "token_coverage": 21
+      }
+    },
+    "incomplete_identities": [],
+    "fixture_adjusted_gain_points": -30.000000000000004,
+    "expected_flagsmith_counts": {
+      "direct": {
+        "exposures": 19,
+        "conversions": 19
+      },
+      "plan_validate": {
+        "exposures": 21,
+        "conversions": 15
+      }
+    },
+    "flagsmith_reconciled": true
+  }
+}
