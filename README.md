@@ -284,10 +284,13 @@ Use the optional rules block in the connector spec. The [invoice example](exampl
 | --- | --- |
 | expected_state | Each listed top-level key in the after object equals its configured JSON value. |
 | required_tool_order | The listed successful tool calls appear in order. Other calls can occur between them. |
+| tool_prerequisites | Each successful call to a mapped tool occurs after all its listed prerequisites have succeeded. Use with `required_tool_order` or `expected_state` to require completion. |
 | forbidden_tools | The trace contains no attempt to call any listed tool, including blocked attempts. |
 | unchanged_state_keys | Each listed key exists before the run and retains the same value after it. |
 
 Supply one rule set per fixture. The endpoint returns the revision, before and after objects, and the ordered tools array. It can omit its own success and forbidden_mutation fields. Aegis calculates both from the evidence and freezes the rules in the benchmark manifest. A changed protected field rejects the candidate in release review. A forbidden tool attempt holds the candidate. The dashboard shows each check alongside the trace.
+
+When a prerequisite represents authorization, emit an `ok` event only for an authorization that actually succeeded. A late successful check cannot make an earlier successful write pass.
 
 Validate a connector against a test fixture before enrolling any Flagsmith identities. This command executes the selected strategy against the configured test endpoint.
 
@@ -298,9 +301,11 @@ python -m aegis connector-check examples/invoice/rules.json --case invoice-appro
 
 The example spec assumes your agent endpoint implements that invoice fixture. Projects with custom grading logic can continue using the original response format and omit rules from their spec.
 
-### Use the optional cloud starter agent
+### Use the optional starter agent
 
 Teams without an agent can use the FastAPI starter with an OpenAI-compatible tool-calling service. The default API base URL is Groq. Copy the starter settings from .env.example into .env and set AEGIS_CLOUD_MODEL to a tool-capable model available on your account. Put the corresponding API key in AEGIS_CLOUD_API_KEY. Use synthetic fixture data because the model provider receives the task, initial state and tool results.
+
+Set `AEGIS_STARTER_LMSTUDIO_MODEL=qwen2.5-3b-instruct` in `.env` to use LM Studio for the starter. Run the same Uvicorn command and change the connector check to `--case invoice-retry` to exercise the simulated lost acknowledgement and verify that the recovered invoice state contains exactly one entry.
 
 The [starter configuration](examples/invoice/starter.json) defines each task, its initial state and its mock tools. Each tool takes an empty object and can return fixed data or update fields in that fixture's state. The companion invoice rules spec owns the expected outcome. Use the same revision in both files and update it when changing the model, fixture, tools or grading rules.
 

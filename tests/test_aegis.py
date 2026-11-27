@@ -44,7 +44,7 @@ class ConnectorRulesTests(unittest.TestCase):
         report = self.run_invoice()
         self.assertFalse(report["success"])
         self.assertEqual([check["kind"] for check in report["checks"] if not check["passed"]],
-                         ["required_tool_order"])
+                         ["required_tool_order", "tool_prerequisites"])
 
     def test_protected_state_and_blocked_forbidden_attempt_are_flagged(self):
         self.result["after"]["payment_status"] = "paid"

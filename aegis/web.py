@@ -11,7 +11,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import ClientDisconnect
 
-from aegis import benchmark
+from aegis import benchmark, regression
 from aegis.core import CASES, STRATEGIES
 from aegis.experiment import flagsmith_key, flagsmith_key_name, flagsmith_origin
 from aegis.runner import MODEL_PROVIDERS, connect, execute
@@ -101,6 +101,14 @@ def create_app(db_path=None):
         if row is None:
             return error_response("Run not found.", 404)
         return unpack(row)
+
+    @app.get("/api/runs/{identity}/case-bundle")
+    def case_bundle(identity: str):
+        try:
+            bundle = regression.from_ledger(db_path, identity)
+            return {"bundle": bundle, "grade": regression.regrade(bundle)}
+        except ValueError as error:
+            return error_response(str(error), 404 if str(error) == "Run not found." else 422)
 
     @app.get("/api/benchmark-review")
     def benchmark_review():

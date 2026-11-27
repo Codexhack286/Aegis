@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 from uuid import uuid4
 
-from aegis import benchmark, connector
+from aegis import benchmark, connector, regression
 from aegis.core import CASES, STRATEGIES
 from aegis.experiment import Experiment
 from aegis.runner import MODEL_PROVIDERS, execute
@@ -59,6 +59,18 @@ def main():
     command.add_argument("spec", type=Path)
     command.add_argument("--case", required=True)
     command.add_argument("--strategy", choices=STRATEGIES, required=True)
+    command = commands.add_parser("case-export", help="Export sanitized helpdesk evidence from the ledger.")
+    command.add_argument("identity")
+    command.add_argument("--db", default="aegis.sqlite3")
+    command = commands.add_parser("case-regrade", help="Evaluate a portable bundle offline.")
+    command.add_argument("bundle", type=Path)
+    command = commands.add_parser("case-compare", help="Run both strategies on isolated fixtures.")
+    command.add_argument("--case", action="append", required=True)
+    command.add_argument("--repeats", type=int, default=1)
+    source = command.add_mutually_exclusive_group()
+    source.add_argument("--model", help="Exact LM Studio model ID. Omit for scripted runs.")
+    source.add_argument("--connector-spec", type=Path, help="Connector spec declaring fresh state per trial.")
+    command.add_argument("--format", choices=("json", "markdown"), default="json")
     command = commands.add_parser("benchmark-prepare", help="Freeze the workload and review thresholds.")
     command.add_argument("manifest")
     command.add_argument("--batch", required=True)
@@ -88,6 +100,30 @@ def main():
             command.add_argument("--reason", required=True)
     args = parser.parse_args()
     try:
+        if args.mode == "case-export":
+            print(json.dumps(regression.from_ledger(args.db, args.identity), indent=2))
+            return 0
+        if args.mode == "case-regrade":
+            try:
+                result = regression.regrade(regression.load(args.bundle))
+            except (OSError, ValueError) as error:
+                print(f"Aegis: {error}", file=sys.stderr)
+                return 2
+            print(json.dumps(result, indent=2))
+            return 0 if result["success"] else 1
+        if args.mode == "case-compare":
+            if not 1 <= args.repeats <= 20:
+                parser.error("--repeats must be between 1 and 20")
+            try:
+                cases = list(dict.fromkeys(args.case))
+                if args.connector_spec is None and any(case not in CASES for case in cases):
+                    raise ValueError(f"Choose a built-in fixture: {', '.join(CASES)}.")
+                result = regression.compare(cases, args.repeats, args.model, spec=args.connector_spec)
+            except (OSError, RuntimeError, ValueError) as error:
+                print(f"Aegis: {error}", file=sys.stderr)
+                return 2
+            print(regression.markdown(result) if args.format == "markdown" else json.dumps(result, indent=2))
+            return {"pass": 0, "regression": 1, "insufficient_evidence": 2}[result["verdict"]]
         if args.mode == "connector-check":
             revision, cases, rules = connector.load_spec(args.spec)
             if args.case not in cases:

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import BenchmarkReview from './components/BenchmarkReview.jsx'
-import { Comparison, ToolTrace } from './components/Trace.jsx'
+import RegressionReview from './components/RegressionReview.jsx'
+import { CaseBundle, Comparison, ToolTrace } from './components/Trace.jsx'
 import { cases, humanize, labels, ms, resultLabel } from './presentation.js'
 
 async function api(path, options) {
@@ -126,6 +127,7 @@ export default function App() {
       {error && <div className="alert" role="alert">{error}</div>}
       {review?.mode === mode && <BenchmarkReview review={review} />}
       {reviewError && <div className="alert benchmark" role="alert">{reviewError}</div>}
+      <RegressionReview />
       <div className="workspace-head">
         <h2>{scoped ? 'Benchmark workspace' : 'Run workspace'}</h2>
         {review?.mode === mode && <label>
@@ -235,6 +237,7 @@ export default function App() {
                 </details>}
               <h3>Tool trajectory</h3>
               <ToolTrace tools={report.tools} />
+              {report.provider !== 'connector' && <CaseBundle key={current.identity} identity={current.identity} api={api} />}
               {reference?.report && reference.identity === other && <Comparison current={current} reference={reference} />}
               <details className="raw"><summary>Full run record</summary><pre>{JSON.stringify(current, null, 2)}</pre></details>
             </div>

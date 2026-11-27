@@ -108,17 +108,33 @@ def run_case(case, strategy, chat):
     ]
     report = run_agent(messages, strategy, chat, TOOLS, helpdesk)
     after = helpdesk.tickets
-    successful_tools = [call["tool"] for call in helpdesk.trace if call["status"] == "ok"]
-    consulted_first = "search_knowledge_base" in successful_tools and (
-        successful_tools.index("search_knowledge_base")
-        < (successful_tools.index("assign_ticket") if "assign_ticket" in successful_tools else len(successful_tools))
-    )
     report.update(
         case=case, strategy=strategy, before=before, after=after, expected_queue=expected_queue,
-        success=report["terminal"] == "finished" and consulted_first and after["T-1"]["queue"] == expected_queue
-        and bool(after["T-1"]["notes"]) and after["T-2"] == before["T-2"],
     )
+    report["success"] = all(check["passed"] for check in ticket_checks(
+        report["terminal"] == "finished", after["T-1"]["queue"], expected_queue,
+        bool(after["T-1"]["notes"]), after["T-2"] == before["T-2"],
+        [call["tool"] for call in helpdesk.trace if call["status"] == "ok"],
+    ))
     return report
+
+
+def ticket_checks(finished, queue, expected_queue, has_note, unrelated_unchanged, successful_tools):
+    lookup = "search_knowledge_base"
+    assign = "assign_ticket"
+    consulted_first = lookup in successful_tools and (
+        assign not in successful_tools or successful_tools.index(lookup) < successful_tools.index(assign)
+    )
+    return [
+        {"rule": rule, "passed": passed}
+        for rule, passed in (
+            ("Agent reached finished status", finished),
+            ("Routing lookup preceded the first assignment", consulted_first),
+            ("Ticket reached the expected queue", queue == expected_queue),
+            ("Ticket has an internal note", has_note),
+            ("Unrelated ticket stayed unchanged", unrelated_unchanged),
+        )
+    ]
 
 
 def run_agent(messages, strategy, chat, schemas, tools):

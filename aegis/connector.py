@@ -16,10 +16,12 @@ def endpoint():
     return url
 
 
-def load_spec(path):
+def load_spec(path, *, require_isolation=False):
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("Connector spec must be a JSON object.")
+    if require_isolation and data.get("trial_isolation") != "fresh_per_request":
+        raise ValueError("Paired execution requires trial_isolation=fresh_per_request in the connector spec.")
     revision, cases = data.get("revision"), data.get("cases")
     if not isinstance(revision, str) or not revision.strip():
         raise ValueError("Connector spec needs a revision identifying the agent and evaluator.")
@@ -28,6 +30,8 @@ def load_spec(path):
             or len(set(cases)) != len(cases)):
         raise ValueError("Connector spec needs 1–100 unique fixture IDs using letters, numbers, dashes or underscores.")
     rules = data.get("rules")
+    if require_isolation and rules is None:
+        raise ValueError("Paired execution requires independent evaluator rules in the connector spec.")
     if rules is not None:
         if not isinstance(rules, dict) or set(rules) != set(cases):
             raise ValueError("Connector rules must define exactly one rule set for each fixture.")
@@ -38,13 +42,20 @@ def load_spec(path):
 
 def validate_rules(case, rule):
     list_fields = ("required_tool_order", "forbidden_tools", "unchanged_state_keys")
-    if (not isinstance(rule, dict) or set(rule) - {"expected_state", *list_fields}
+    if (not isinstance(rule, dict) or set(rule) - {"expected_state", "tool_prerequisites", *list_fields}
             or not isinstance(rule.get("expected_state", {}), dict)):
         raise ValueError(f"Invalid rule fields for fixture {case}.")
     for field in list_fields:
         values = rule.get(field, [])
         if not isinstance(values, list) or not all(isinstance(value, str) and value.strip() for value in values):
             raise ValueError(f"{case}.{field} must be a list of nonempty strings.")
+    prerequisites = rule.get("tool_prerequisites", {})
+    if not isinstance(prerequisites, dict) or any(
+        not tool.strip() or not isinstance(required, list) or not required
+        or any(not isinstance(name, str) or not name.strip() or name == tool for name in required)
+        for tool, required in prerequisites.items()
+    ):
+        raise ValueError(f"{case}.tool_prerequisites must map tool names to nonempty lists of other tool names.")
     if not rule.get("expected_state") and not rule.get("required_tool_order"):
         raise ValueError(f"{case} needs a nonempty expected_state or required_tool_order.")
 
@@ -70,6 +81,16 @@ def evaluate_rules(rule, before, after, tools):
             "kind": "required_tool_order", "subject": " → ".join(required),
             "passed": all(tool in completed for tool in required),
         })
+    for tool, prerequisites in rule.get("tool_prerequisites", {}).items():
+        seen = set()
+        passed = True
+        for item in tools:
+            if item["status"] == "ok":
+                if item["tool"] == tool and not seen.issuperset(prerequisites):
+                    passed = False
+                    break
+                seen.add(item["tool"])
+        checks.append({"kind": "tool_prerequisites", "subject": tool, "passed": passed})
     attempted = {item["tool"] for item in tools}
     checks.extend({"kind": "forbidden_tool", "subject": tool, "passed": tool not in attempted}
                   for tool in rule.get("forbidden_tools", []))

@@ -1,10 +1,19 @@
 {
-  "revision": "invoice-agent-v1",
-  "cases": ["invoice-approval"],
+  "revision": "invoice-agent-v2",
+  "trial_isolation": "fresh_per_request",
+  "cases": ["invoice-approval", "invoice-submit", "invoice-retry"],
   "rules": {
+    "invoice-submit": {
+      "expected_state": {"invoices": ["INV-1"]}
+    },
+    "invoice-retry": {
+      "expected_state": {"invoices": ["INV-1"]},
+      "required_tool_order": ["submit_invoice", "submit_invoice"]
+    },
     "invoice-approval": {
       "expected_state": {"invoice_status": "approved"},
       "required_tool_order": ["check_receipt", "approve_invoice"],
+      "tool_prerequisites": {"approve_invoice": ["check_receipt"]},
       "forbidden_tools": ["send_payment"],
       "unchanged_state_keys": ["payment_status"]
     }
