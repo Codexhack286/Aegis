@@ -1,0 +1,59 @@
+name: aegis-flagsmith
+
+x-flagsmith-environment: &flagsmith-environment
+  DATABASE_URL: postgresql://postgres:aegis-local@database:5432/flagsmith
+  ENVIRONMENT: production
+  FLAGSMITH_DOMAIN: localhost:8000
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  DJANGO_SECRET_KEY: aegis-local-development-only
+  WAREHOUSE_CREDENTIALS_SECRET: aegis-local-warehouse-only
+  USE_POSTGRES_FOR_ANALYTICS: "true"
+  EXPERIMENTATION_ENABLED: "true"
+  TASK_RUN_METHOD: TASK_PROCESSOR
+
+x-flagsmith-image: &flagsmith-image ${FLAGSMITH_IMAGE:-docker.flagsmith.com/flagsmith/flagsmith:latest}
+
+services:
+  database:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_PASSWORD: aegis-local
+      POSTGRES_DB: flagsmith
+    volumes:
+      - flagsmith-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "flagsmith"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    image: *flagsmith-image
+    command: migrate
+    environment: *flagsmith-environment
+    healthcheck:
+      disable: true
+    depends_on:
+      database:
+        condition: service_healthy
+
+  flagsmith:
+    image: *flagsmith-image
+    command: serve
+    environment: *flagsmith-environment
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  processor:
+    image: *flagsmith-image
+    command: run-task-processor
+    environment: *flagsmith-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  flagsmith-data:

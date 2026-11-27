@@ -12,16 +12,26 @@ def flagsmith_origin():
     raise ValueError("Set FLAGSMITH_MODE to cloud or self-hosted.")
 
 
+def flagsmith_key_name(origin):
+    return "FLAGSMITH_CLOUD_ENVIRONMENT_KEY" if origin is None else "FLAGSMITH_LOCAL_ENVIRONMENT_KEY"
+
+
+def flagsmith_key(origin):
+    if "FLAGSMITH_CLOUD_ENVIRONMENT_KEY" in os.environ or "FLAGSMITH_LOCAL_ENVIRONMENT_KEY" in os.environ:
+        return os.environ.get(flagsmith_key_name(origin), "").strip()
+    return os.environ.get("FLAGSMITH_ENVIRONMENT_KEY", "").strip()
+
+
 class Experiment:
     def __init__(self):
-        key = os.environ.get("FLAGSMITH_ENVIRONMENT_KEY")
+        origin = flagsmith_origin()
+        key = flagsmith_key(origin)
         if not key:
-            raise ValueError("Set FLAGSMITH_ENVIRONMENT_KEY for the running experiment.")
+            raise ValueError("Set the SDK environment key for the selected FLAGSMITH_MODE in .env.")
         try:
             from flagsmith import EventProcessorConfig, Flagsmith
         except ImportError as error:
             raise RuntimeError("Install the experiment extra with uv sync --extra experiment.") from error
-        origin = flagsmith_origin()
         flags_options = {}
         event_options = {"max_buffer_items": 1}
         if origin is not None:

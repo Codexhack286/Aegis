@@ -5,6 +5,7 @@ from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
@@ -12,6 +13,7 @@ from starlette.requests import ClientDisconnect
 
 from aegis import benchmark
 from aegis.core import CASES, STRATEGIES
+from aegis.experiment import flagsmith_key, flagsmith_key_name, flagsmith_origin
 from aegis.runner import MODEL_PROVIDERS, connect, execute
 
 DIST = Path(__file__).resolve().parent.parent / "ui" / "dist"
@@ -43,6 +45,7 @@ def summarize(arm, rows):
 
 
 def create_app(db_path=None):
+    load_dotenv(Path.cwd() / ".env", encoding="utf-8-sig", override=False)
     app = FastAPI(title="Aegis API")
     db_path = db_path or os.environ.get("AEGIS_DB", "aegis.sqlite3")
 
@@ -77,10 +80,18 @@ def create_app(db_path=None):
                 "success": report.get("success"),
                 "latency_ms": report.get("latency_ms"),
             })
+        try:
+            origin = flagsmith_origin()
+            configuration_error = None if flagsmith_key(origin) else (
+                f"Set {flagsmith_key_name(origin)} in .env and restart the dashboard backend."
+            )
+        except ValueError as error:
+            configuration_error = str(error)
         return {
             "cases": list(CASES), "runs": recent, "run_count": len(rows),
             "arms": [summarize(arm, rows) for arm in STRATEGIES],
-            "live_configured": bool(os.environ.get("FLAGSMITH_ENVIRONMENT_KEY")),
+            "live_configured": configuration_error is None,
+            "live_configuration_error": configuration_error,
         }
 
     @app.get("/api/runs/{identity}")

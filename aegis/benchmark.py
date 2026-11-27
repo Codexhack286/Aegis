@@ -3,7 +3,6 @@
 from contextlib import closing
 from hashlib import file_digest, sha256
 import json
-import os
 from pathlib import Path
 import random
 import re
@@ -17,7 +16,7 @@ from aegis.runner import (
     LM_STUDIO_OPTIONS, OLLAMA_OPTIONS, check_lmstudio_model, connect, execute,
     lmstudio_origin, model_digest, ollama_origin,
 )
-from aegis.experiment import flagsmith_origin
+from aegis.experiment import flagsmith_key, flagsmith_origin
 
 FIXTURE_DIGEST = sha256(json.dumps([CASES, INITIAL_QUEUES, TOOLS, TRIAGE_PROMPT], sort_keys=True).encode()).hexdigest()
 
@@ -27,10 +26,10 @@ def fingerprint(value):
 
 
 def experiment_environment():
-    key = os.environ.get("FLAGSMITH_ENVIRONMENT_KEY")
-    if not key:
-        raise ValueError("Set FLAGSMITH_ENVIRONMENT_KEY before preparing a live batch.")
     origin = flagsmith_origin()
+    key = flagsmith_key(origin)
+    if not key:
+        raise ValueError("Set the SDK environment key for the selected FLAGSMITH_MODE in .env.")
     return fingerprint([origin, key])
 
 

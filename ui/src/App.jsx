@@ -178,7 +178,8 @@ export default function App() {
           </button>
           {mode === 'offline' && <button className="secondary" value="compare" disabled={busy}>Run both strategies</button>}
           <small>{mode === 'offline' ? (fixture === 'recovery-drill' ? 'Both scripts send one invalid queue. The candidate script then repairs it.' : 'Executes a scripted tool sequence locally.') : (data?.live_configured
-            ? 'Flagsmith assigns the strategy for this identity.' : 'Set the Flagsmith environment key to enable live runs.')}</small>
+            ? 'Flagsmith assigns the strategy for this identity.'
+            : data?.live_configuration_error ?? 'Checking Flagsmith configuration…')}</small>
         </form>
       </div>
 

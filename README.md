@@ -10,9 +10,21 @@ A helpdesk agent can say “I routed the ticket” while leaving it in the wrong
 | `ui/src/` | React entry point, dashboard workspace, and components for review and trace inspection. |
 | `examples/invoice/` | Invoice starter fixture and its matching evaluator rules. |
 | `benchmarks/qwen-measured-01/` | Frozen manifest, reconciled Flagsmith counts, and saved rollout decision. |
+| `deploy/flagsmith/` | Docker Compose setup for a local Flagsmith experiment. |
 | `tests/` | Python regression tests. |
 
 Run the documented commands from the repository root. The default SQLite ledger is `aegis.sqlite3` in that directory.
+
+## Configuration
+
+Copy `.env.example` to `.env` once. Use that file for every live command and for dashboard startup. Set one or both Flagsmith SDK environment keys and change `FLAGSMITH_MODE` to select the instance.
+
+| Mode | Required key | Endpoint |
+| --- | --- | --- |
+| `cloud` | `FLAGSMITH_CLOUD_ENVIRONMENT_KEY` | Flagsmith Cloud |
+| `self-hosted` | `FLAGSMITH_LOCAL_ENVIRONMENT_KEY` | `FLAGSMITH_ORIGIN`, defaulting to `http://localhost:8000` |
+
+The dashboard backend loads `.env` from the working directory at startup. Settings exported in the shell take precedence. Restart the backend after editing `.env`. Use the same Flagsmith mode when preparing and resuming a live benchmark.
 
 ## Hackathon decision
 
@@ -70,16 +82,11 @@ Flagsmith assigned 40 synthetic helpdesk runs across five fixtures. Both strateg
 - [Reconciled Flagsmith counts](benchmarks/qwen-measured-01/flagsmith-counts.json)
 - [Saved decision and review snapshot](benchmarks/qwen-measured-01/decision.json)
 
-## Delivery sequence
+## Verified and remaining work
 
-| IST date | Build target | Evidence to keep |
-| --- | --- | --- |
-| Nov 26 | Prove local Flagsmith assignment and conversion attribution first. | Two real variation assignments and reconciled smoke counts. |
-| Nov 27 | Implement isolated ticket tools, both strategies and the evaluator. | One successful trace, one false claim of completion, one blocked write. |
-| Nov 28 | Freeze fixtures and decision rules, run both arms and build the report. | Manifest, configuration, raw counts, failed trace and measured overhead. |
-| Nov 29 | Rehearse from clean setup and record before the 8 PM IST cutoff. | Public GitHub repo, reproducible README and short working demo. |
-
-Open the demo with a ticket the agent says it resolved. Show the actual state, then the Flagsmith variation that chose the strategy. Open the native experiment result, inspect one trace behind the aggregate and close on the human release decision. If integrations slip, cut dashboard polish and show the CLI trace beside Flagsmith. A synthetic success or a local random split cannot prove the sponsor integration.
+- Verified Flagsmith Cloud and self-hosted assignment and event attribution. The measured Qwen benchmark ran on Cloud. The self-hosted check paired a synthetic event batch with a successful local Qwen task.
+- The Python SDK and connector rules passed simulated integration checks. A real invoice run through the cloud starter remains to be verified.
+- For the demo, show the Flagsmith assignment, the password-reset trace with assignment before lookup, and the resulting Hold decision. A clean-clone rehearsal and a recorded demo remain.
 
 [Official rules and submission requirements](https://www.wemakedevs.org/hackathons/flagsmith/rules) · [Hackathon tracks](https://www.wemakedevs.org/hackathons/flagsmith) · [Self-hosted experimentation](https://docs.flagsmith.com/experimentation/self-hosting)
 
@@ -95,9 +102,44 @@ python -m aegis offline --strategy plan_validate --case duplicate-charge
 
 The fixtures cover password resets, duplicate charges, escalation and a routing recovery drill. Success requires a knowledge base lookup before assignment, the expected queue and an internal note. Blocked tool attempts appear in the trace as a separate guardrail. Both strategies have six model calls and eight tool calls available. The candidate uses one model call for planning and has at most one correction after invalid arguments.
 
-### Test the local Flagsmith experiment
+### Try self-hosted Flagsmith
 
-With the dedicated smoke experiment running, copy .env.example to .env and set FLAGSMITH_ENVIRONMENT_KEY to the SDK key for that environment. If your project is on app.flagsmith.com, set FLAGSMITH_MODE=cloud to use the SDK's hosted flag evaluation and event ingestion endpoints. For a local instance, keep FLAGSMITH_MODE=self-hosted and set FLAGSMITH_ORIGIN as needed. Choose a fresh batch prefix for every smoke run. Compare the printed assignments and success submissions with the Flagsmith dashboard after refreshing the results.
+Start Docker Desktop with the Linux container engine. The included Compose stack starts PostgreSQL, runs the Flagsmith database migration, and launches the dashboard and task processor. It uses development credentials and binds the dashboard to loopback. Set `FLAGSMITH_IMAGE` in your shell if you want to pin a specific published image.
+
+```powershell
+docker compose -f deploy/flagsmith/compose.yaml up -d
+docker compose -f deploy/flagsmith/compose.yaml ps -a
+Invoke-RestMethod http://localhost:8000/health/liveness/
+```
+
+Open http://localhost:8000 to create the local admin and project. In Development, enable **Flagsmith database** in **Environment Settings → Warehouse**, then create the smoke experiment using the flag and metric above. Set these values in `.env`:
+
+```dotenv
+FLAGSMITH_MODE=self-hosted
+FLAGSMITH_ORIGIN=http://localhost:8000
+FLAGSMITH_LOCAL_ENVIRONMENT_KEY=your_local_development_key
+```
+
+```powershell
+uv run --extra experiment --env-file .env python -m aegis flagsmith-smoke --batch local-smoke-01
+```
+
+Compare the printed counts with the local experiment results. Use a fresh batch prefix for each smoke run. [Flagsmith self-hosting guide](https://docs.flagsmith.com/experimentation/self-hosting)
+
+#### Verified local smoke test
+
+The `selfhost-01` batch enrolled 20 identities per arm and submitted synthetic conversions for 9 control and 11 candidate identities. A subsequent live password-reset run, `selfhost-qwen-01`, used Qwen2.5 3B Instruct via LM Studio. Flagsmith assigned it to `direct`, and Aegis verified the routing and note. The run took 5,906 ms and reported 1,500 tokens.
+
+| Strategy | Local Flagsmith exposures | Local Flagsmith conversions |
+| --- | ---: | ---: |
+| `direct` | 21 | 10 |
+| `plan_validate` | 20 | 11 |
+
+The dashboard totals matched the expected counts after the live run. This verifies local assignment, model execution, and event attribution. The totals include synthetic events from the smoke batch. Use a separate experiment to compare strategies.
+
+### Test either Flagsmith instance
+
+With the dedicated smoke experiment running, confirm that `.env` selects the matching instance and Development SDK key. Choose a fresh batch prefix for every smoke run. Compare the printed assignments and success submissions with the Flagsmith dashboard after refreshing the results.
 
 ```powershell
 uv run --extra experiment --env-file .env python -m aegis flagsmith-smoke --batch setup-01
@@ -106,7 +148,7 @@ uv run --extra experiment --env-file .env python -m aegis flagsmith-smoke --batc
 Use a fresh running experiment for model runs. Start Ollama with a tool-capable model available locally, then pass its exact installed tag and a unique identity from the run manifest. Flagsmith chooses the strategy, while Ollama executes its prompts. Defaults are localhost ports 8000 and 11434. Use FLAGSMITH_ORIGIN and OLLAMA_ORIGIN to override the service origins.
 
 ```powershell
-.\.venv\Scripts\python -m aegis live --identity trial-01-password-reset --model qwen2.5:3b
+uv run --extra experiment --env-file .env python -m aegis live --identity trial-01-password-reset --model qwen2.5:3b
 ```
 
 A live run saves its trace before submitting a success event. A status of event_submitted_unverified means the SDK call returned and the dashboard count still needs reconciliation. Preserve pending rows after an interrupted run so you can check attribution before replaying. Use a frozen benchmark manifest to pin the model digest and record it with each trace.
@@ -118,8 +160,7 @@ A live run saves its trace before submitting a success event. A status of event_
 Use Python 3.11 or later and Node.js 22.12+ or 24+. From the repository root, install the UI dependencies and start FastAPI with Uvicorn.
 
 ```powershell
-uv sync --extra ui --python 3.12
-.\.venv\Scripts\python -m uvicorn aegis.web:create_app --factory --host 127.0.0.1 --port 5000
+uv run --python 3.12 --extra ui --extra experiment --env-file .env python -m uvicorn aegis.web:create_app --factory --host 127.0.0.1 --port 5000
 ```
 
 In a second shell, install and start the Vite UI.
@@ -152,8 +193,8 @@ Set AEGIS_MANIFEST before starting FastAPI to show the same review in the dashbo
 For a measured batch, use a dedicated running Flagsmith experiment and a fresh batch prefix. Warm up Ollama before the batch. Start by checking both services and adjust the frozen thresholds as needed before preparing the manifest.
 
 ```powershell
-python -m aegis benchmark-prepare measured-manifest.json --batch measured-01 --live --model qwen2.5:3b --repeats 6
-python -m aegis benchmark-run measured-manifest.json
+uv run --extra experiment --env-file .env python -m aegis benchmark-prepare measured-manifest.json --batch measured-01 --live --model qwen2.5:3b --repeats 6
+uv run --extra experiment --env-file .env python -m aegis benchmark-run measured-manifest.json
 python -m aegis benchmark-review measured-manifest.json
 ```
 
@@ -172,8 +213,8 @@ python -m aegis benchmark-decision demo-manifest.json --decision hold --reason "
 Start the local server from LM Studio's Developer tab and load Qwen2.5 3B Instruct. Copy its API identifier from the tab or GET http://127.0.0.1:1234/v1/models. Run the following from the project root and substitute the exact identifier.
 
 ```powershell
-python -m aegis model-test --model '<api-model-id>' --strategy direct --case password-reset
-python -m aegis model-test --model '<api-model-id>' --strategy plan_validate --case password-reset
+uv run --env-file .env python -m aegis model-test --model '<api-model-id>' --strategy direct --case password-reset
+uv run --env-file .env python -m aegis model-test --model '<api-model-id>' --strategy plan_validate --case password-reset
 ```
 
 The CLI uses LM Studio's OpenAI-compatible local endpoint at http://127.0.0.1:1234 by default. Set LM_STUDIO_ORIGIN if you use another local port and LM_STUDIO_API_KEY if authentication is enabled. These manually assigned model checks write traces under model-test in SQLite and do not generate Flagsmith experiment events.

@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 .env
+.env.flagsmith.local
 flagsmith.env
 *.sqlite3*
 node_modules/
