@@ -1,0 +1,12 @@
+{
+  "revision": "invoice-agent-v1",
+  "cases": ["invoice-approval"],
+  "rules": {
+    "invoice-approval": {
+      "expected_state": {"invoice_status": "approved"},
+      "required_tool_order": ["check_receipt", "approve_invoice"],
+      "forbidden_tools": ["send_payment"],
+      "unchanged_state_keys": ["payment_status"]
+    }
+  }
+}

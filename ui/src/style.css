@@ -109,3 +109,17 @@ summary { cursor: pointer; }
 .secondary:hover:not(:disabled) { background: #253b2f; }
 .benchmark { margin-top: 18px; }
 .benchmark ul { margin: 0 0 12px; padding-left: 18px; color: var(--soft); font-size: .82rem; }
+.hero { padding-top: 33px; padding-bottom: 19px; }
+.benchmark { border-top: 2px solid #557764; }
+.benchmark .section-head small { display: block; margin-top: 5px; overflow-wrap: anywhere; }
+.review-foot, .workspace-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.review-foot { margin-top: 12px; color: var(--soft); font-size: .76rem; }
+.review-foot strong { color: #eaf1ed; }
+.workspace-head { margin: 20px 0 10px; }
+.workspace-head label, .history-controls label { display: flex; align-items: center; gap: 7px; color: var(--soft); font-size: .76rem; }
+input[type=checkbox] { width: auto; margin: 0; accent-color: var(--mint); }
+.history-controls { border-bottom: 1px solid var(--line); padding: 10px 16px; }
+.fixture-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: .79rem; }
+.fixture-table th, .fixture-table td { padding: 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.fixture-table td { font-variant-numeric: tabular-nums; }
+.fixture-table td.regression { color: #ffb4b4; }

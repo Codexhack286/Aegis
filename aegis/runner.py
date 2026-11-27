@@ -74,6 +74,10 @@ def ollama(model, messages, tools):
 
 
 def lmstudio(model, messages, tools):
+    return openai_chat(f"{lmstudio_origin()}/v1", lmstudio_headers(), model, messages, tools)
+
+
+def openai_chat(base_url, headers, model, messages, tools):
     history = [
         {"role": "tool", "content": message["content"], "tool_call_id": message["tool_call_id"]}
         if message["role"] == "tool" else message
@@ -83,7 +87,7 @@ def lmstudio(model, messages, tools):
     if tools:
         payload["tools"] = tools
     request = Request(
-        f"{lmstudio_origin()}/v1/chat/completions", json.dumps(payload).encode(), lmstudio_headers(),
+        f"{base_url}/chat/completions", json.dumps(payload).encode(), headers,
     )
     with urlopen(request, timeout=60) as response:
         result = json.load(response)
@@ -142,7 +146,8 @@ def execute(args):
             db.execute("UPDATE runs SET strategy = ? WHERE identity = ?", (strategy, identity))
         if provider == "connector":
             try:
-                result = connector.run(args.case, strategy, identity, args.connector_revision)
+                result = connector.run(args.case, strategy, identity, args.connector_revision,
+                                       getattr(args, "connector_rule", None))
             except (OSError, ValueError):
                 with db:
                     db.execute("UPDATE runs SET status = 'connector_error' WHERE identity = ?", (identity,))

@@ -47,13 +47,26 @@ def create_app(db_path=None):
     db_path = db_path or os.environ.get("AEGIS_DB", "aegis.sqlite3")
 
     @app.get("/api/workspace")
-    def workspace(mode: str = "offline"):
+    def workspace(mode: str = "offline", benchmark_only: bool = False):
         if mode not in ("offline", "live"):
             return error_response("Choose offline or live.")
         with closing(connect(db_path)) as db:
             rows = [unpack(row) for row in db.execute(
                 "SELECT * FROM runs WHERE mode = ? ORDER BY rowid DESC", (mode,),
             )]
+        if benchmark_only:
+            manifest_path = os.environ.get("AEGIS_MANIFEST")
+            if not manifest_path:
+                return error_response("Set AEGIS_MANIFEST to scope the workspace.")
+            try:
+                manifest = benchmark.load(manifest_path)
+                manifest_id = benchmark.fingerprint(manifest)
+                identities = {entry["identity"] for entry in manifest["runs"]}
+                rows = [row for row in rows if row["identity"] in identities and (
+                    row["report"] is None or row["report"].get("manifest_id") == manifest_id
+                )]
+            except (OSError, ValueError, KeyError, TypeError):
+                return error_response("Could not read the configured benchmark manifest.")
         recent = []
         for row in rows[:50]:
             report = row["report"] or {}

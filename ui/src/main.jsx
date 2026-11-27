@@ -61,10 +61,12 @@ function Comparison({ current, reference }) {
 
 function BenchmarkReview({ review }) {
   const statuses = { hold: 'Hold', reject: 'Reject', review_for_expansion: 'Review for expansion' }
+  const fixtures = [...new Set(Object.values(review.arms).flatMap(arm => Object.keys(arm.by_fixture)))].sort()
   return <section className="panel benchmark">
     <div className="section-head">
-      <h2>Release review · {review.batch}</h2>
-      <span className={`pill ${review.recommendation === 'review_for_expansion' ? 'ok' : 'invalid'}`}>
+      <div><h2>Release review</h2><small>{review.batch}{review.model && ` · ${review.model}`}</small></div>
+      <span className={`pill ${review.recommendation === 'review_for_expansion' ? 'ok' :
+        review.recommendation === 'reject' ? 'blocked' : 'invalid'}`}>
         {statuses[review.recommendation]}
       </span>
     </div>
@@ -78,13 +80,30 @@ function BenchmarkReview({ review }) {
           {' · '}{stats.token_coverage}/{stats.evaluated} measured
         </span>}
       </div>)}</div>
-      {review.fixture_adjusted_gain_points != null && <small>
-        Candidate success gain with equal fixture weighting · {review.fixture_adjusted_gain_points.toFixed(1)} pp
-      </small>}
-      {review.mode === 'live' && <small>
-        {review.flagsmith_reconciled ? 'Flagsmith counts reconciled.' : 'Flagsmith counts awaiting reconciliation.'}
-        {' '}A human controls rollout.
-      </small>}
+      <div className="review-foot">
+        {review.fixture_adjusted_gain_points != null && <span>
+          <strong>{review.fixture_adjusted_gain_points > 0 ? '+' : ''}{review.fixture_adjusted_gain_points.toFixed(1)} pp</strong>
+          {' '}fixture-adjusted gain
+        </span>}
+        {review.mode === 'live' && <span className={`pill ${review.flagsmith_reconciled ? 'ok' : 'invalid'}`}>
+          {review.flagsmith_reconciled ? 'Flagsmith reconciled' : 'Reconciliation pending'}
+        </span>}
+      </div>
+      {fixtures.length > 0 && <details className="raw">
+        <summary>Fixture results</summary>
+        <table className="fixture-table">
+          <thead><tr><th scope="col">Fixture</th><th scope="col">Baseline passed</th><th scope="col">Candidate passed</th></tr></thead>
+          <tbody>{fixtures.map(fixture => <tr key={fixture}>
+            <th scope="row">{cases[fixture] || fixture}</th>
+            {['direct', 'plan_validate'].map(arm => {
+              const result = review.arms[arm].by_fixture[fixture]
+              return <td key={arm} className={result && result.successful < result.evaluated ? 'regression' : ''}>
+                {result ? `${result.successful} / ${result.evaluated}` : '—'}
+              </td>
+            })}
+          </tr>)}</tbody>
+        </table>
+      </details>}
     </div>
   </section>
 }
@@ -105,6 +124,9 @@ function App() {
   const [error, setError] = useState('')
   const [review, setReview] = useState(null)
   const [reviewError, setReviewError] = useState('')
+  const [batchOnly, setBatchOnly] = useState(true)
+  const [failuresOnly, setFailuresOnly] = useState(false)
+  const scoped = batchOnly && review?.mode === mode
 
   useEffect(() => {
     let active = true
@@ -122,14 +144,14 @@ function App() {
 
   useEffect(() => {
     let active = true
-    api(`/workspace?mode=${mode}`).then(payload => {
+    api(`/workspace?mode=${mode}&benchmark_only=${Boolean(scoped)}`).then(payload => {
       if (!active) return
       setData(payload)
       select(previous => payload.runs.some(run => run.identity === previous)
         ? previous : payload.runs[0]?.identity ?? null)
     }).catch(error => { if (active) setError(error.message) })
     return () => { active = false }
-  }, [mode, epoch])
+  }, [mode, epoch, scoped])
 
   const other = current?.report && data?.runs.find(run => run.case_id === current.case_id
     && run.model === current.model
@@ -166,6 +188,8 @@ function App() {
       if (compare) await submit('direct')
       const result = await submit(compare ? 'plan_validate' : strategy)
       setCurrent(null)
+      setBatchOnly(false)
+      setFailuresOnly(false)
       select(result.identity)
       if (mode === 'live') setIdentity('')
     } catch (error) {
@@ -177,6 +201,7 @@ function App() {
   }
 
   const report = current?.identity === selected ? current.report : null
+  const visibleRuns = data?.runs.filter(run => !failuresOnly || run.success === false) ?? []
   return <>
     <header className="top"><div className="shell top-inner">
       <a className="brand" href="/" aria-label="Aegis dashboard"><span className="logo"><i /></span>Aegis</a>
@@ -192,12 +217,22 @@ function App() {
 
     <main className="shell">
       <div className="hero">
-        <p className="eyebrow"><span /> HELPDESK TRIAGE</p>
         <h1>Strategy evaluation</h1>
-        <p>Compare agent strategies by ticket outcome and inspect the tool calls behind each result.</p>
+        <p>Compare agent outcomes and inspect the actions behind each result.</p>
       </div>
 
       {error && <div className="alert" role="alert">{error}</div>}
+      {review?.mode === mode && <BenchmarkReview review={review} />}
+      {reviewError && <div className="alert benchmark" role="alert">{reviewError}</div>}
+      <div className="workspace-head">
+        <h2>{scoped ? 'Benchmark workspace' : 'Run workspace'}</h2>
+        {review?.mode === mode && <label>
+          <input type="checkbox" checked={batchOnly} onChange={event => {
+            setBatchOnly(event.target.checked)
+            setData(null)
+          }} /> Show configured benchmark only
+        </label>}
+      </div>
       <div className="overview">
         <div className="arm-grid">{['direct', 'plan_validate'].map((arm, index) => {
           const stats = data?.arms.find(item => item.strategy === arm)
@@ -218,7 +253,7 @@ function App() {
         })}</div>
 
         <form className="panel run-form" onSubmit={start}>
-          <h2>New run</h2>
+          <h2>New standalone run</h2>
           <label>Ticket fixture<select value={fixture} onChange={event => setFixture(event.target.value)}>
             {Object.entries(cases).map(([key, title]) => <option key={key} value={key}>{title}</option>)}
           </select></label>
@@ -245,17 +280,27 @@ function App() {
         </form>
       </div>
 
-      {review?.mode === mode && <BenchmarkReview review={review} />}
-      {reviewError && <div className="alert benchmark" role="alert">{reviewError}</div>}
       <div className="workbench">
         <section className="panel run-list">
           <div className="section-head"><h2>Run history</h2><span>{data?.run_count ?? '—'} total</span></div>
-          {data?.runs.length ? <ul>{data.runs.map(run => <li key={run.identity}>
+          <div className="history-controls">
+            <label><input type="checkbox" checked={failuresOnly} onChange={event => {
+              setFailuresOnly(event.target.checked)
+              const failed = data?.runs.find(run => run.success === false)
+              if (event.target.checked && !data?.runs.some(run => run.identity === selected && run.success === false)) {
+                select(failed?.identity ?? null)
+              } else if (!event.target.checked && !selected) {
+                select(data?.runs[0]?.identity ?? null)
+              }
+            }} /> Failures only</label>
+          </div>
+          {visibleRuns.length ? <ul>{visibleRuns.map(run => <li key={run.identity}>
             <button type="button" aria-pressed={selected === run.identity} onClick={() => { setCurrent(null); select(run.identity); if (selected === run.identity) refresh(value => value + 1) }}>
               <span><strong>{cases[run.case_id] || run.case_id}</strong><small>{labels[run.strategy] || 'Awaiting assignment'}</small></span>
               <span className={`pill ${run.success ? 'ok' : run.success === false ? 'blocked' : ''}`}>{resultLabel(run.success)}</span>
             </button>
-          </li>)}</ul> : <p className="empty">{data ? 'Run a ticket to start the history.' : 'Waiting for run history.'}</p>}
+          </li>)}</ul> : <p className="empty">{!data ? 'Waiting for run history.' :
+            failuresOnly ? 'No failures in the displayed history.' : 'No runs in this workspace yet.'}</p>}
         </section>
 
         <section className="panel inspection">
@@ -274,6 +319,13 @@ function App() {
                 </div>}
               </dl>
               {report.final_text && <blockquote>{report.final_text}</blockquote>}
+              {report.checks?.length > 0 && <>
+                <h3>Evaluation checks</h3>
+                <ul>{report.checks.map((check, index) => <li key={index}>
+                  <span className={`pill ${check.passed ? 'ok' : 'blocked'}`}>{resultLabel(check.passed)}</span>
+                  {' '}{humanize(check.kind)} · {check.subject}
+                </li>)}</ul>
+              </>}
               {report.provider === 'connector' && (report.before != null || report.after != null) &&
                 <details className="raw"><summary>Project state before and after</summary>
                   <pre>{JSON.stringify({ before: report.before, after: report.after }, null, 2)}</pre>

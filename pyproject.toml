@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "aegis-canary"
 version = "0.1.0"
@@ -6,5 +10,11 @@ requires-python = ">=3.11"
 [project.optional-dependencies]
 ui = ["fastapi==0.141.1", "uvicorn==0.52.4"]
 experiment = ["flagsmith==6.3.0"]
+
+[tool.setuptools.packages.find]
+include = ["aegis*"]
+
+[tool.uv]
+package = false
 
 

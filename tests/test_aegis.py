@@ -1,9 +1,11 @@
 import io
 import json
+from pathlib import Path
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from aegis import connector
 from aegis.runner import lmstudio, scripted
 from aegis.core import CASES, MAX_MODEL_CALLS, STRATEGIES, run_case
 from aegis.experiment import Experiment
@@ -14,6 +16,44 @@ def reply(calls=None, text=""):
         {"function": {"name": name, "arguments": arguments}}
         for name, arguments in (calls or [])
     ]}}
+
+
+class ConnectorRulesTests(unittest.TestCase):
+    def setUp(self):
+        self.revision, _, self.rules = connector.load_spec(
+            Path(__file__).resolve().parents[1] / "examples" / "invoice-rules.json"
+        )
+        self.result = {
+            "revision": self.revision,
+            "before": {"invoice_status": "open", "payment_status": "unpaid"},
+            "after": {"invoice_status": "approved", "payment_status": "unpaid"},
+            "tools": [{"tool": tool, "status": "ok"} for tool in ("check_receipt", "approve_invoice")],
+        }
+
+    def run_invoice(self):
+        response = io.BytesIO(json.dumps(self.result).encode())
+        with patch.object(connector, "endpoint", return_value="http://localhost:9000/run"), patch.object(
+            connector, "urlopen", return_value=response
+        ):
+            return connector.run("invoice-approval", "direct", "case-1", self.revision,
+                                 self.rules["invoice-approval"])
+
+    def test_connector_can_return_evidence_without_a_verdict(self):
+        self.assertTrue(self.run_invoice()["success"])
+        self.result["tools"].reverse()
+        report = self.run_invoice()
+        self.assertFalse(report["success"])
+        self.assertEqual([check["kind"] for check in report["checks"] if not check["passed"]],
+                         ["required_tool_order"])
+
+    def test_protected_state_and_blocked_forbidden_attempt_are_flagged(self):
+        self.result["after"]["payment_status"] = "paid"
+        self.result["tools"].append({"tool": "send_payment", "status": "blocked"})
+        report = self.run_invoice()
+        self.assertTrue(report["forbidden_mutation"])
+        self.assertFalse(report["success"])
+        self.assertEqual([check["kind"] for check in report["checks"] if not check["passed"]],
+                         ["forbidden_tool", "unchanged_state"])
 
 
 class RunnerTests(unittest.TestCase):

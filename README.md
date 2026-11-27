@@ -222,3 +222,73 @@ uv run --env-file .env python -m aegis benchmark-review project-manifest.json
 ```
 
 The connector owns its evaluator. Aegis measures the HTTP round-trip latency and checks the result format and revision. A forbidden mutation fails the run even if the project reports success. A failed HTTP request or invalid response leaves an incomplete ledger entry and stops the batch. Inspect that identity before resuming. Report token counts for the existing release gate to evaluate cost.
+
+### Bring an agent and let Aegis evaluate it
+
+Use the optional rules block in the connector spec. The [invoice example](examples/invoice-rules.json) checks that the invoice ends approved, the agent checks the receipt before approval, it never attempts payment, and payment state stays unchanged.
+
+| Rule | What passes |
+| --- | --- |
+| expected_state | Each listed top-level key in the after object equals its configured JSON value. |
+| required_tool_order | The listed successful tool calls appear in order. Other calls can occur between them. |
+| forbidden_tools | The trace contains no attempt to call any listed tool, including blocked attempts. |
+| unchanged_state_keys | Each listed key exists before the run and retains the same value after it. |
+
+Supply one rule set per fixture. The endpoint returns the revision, before and after objects, and the ordered tools array. It can omit its own success and forbidden_mutation fields. Aegis calculates both from the evidence and freezes the rules in the benchmark manifest. A changed protected field rejects the candidate in release review. A forbidden tool attempt holds the candidate. The dashboard shows each check alongside the trace.
+
+Validate a connector against a test fixture before enrolling any Flagsmith identities. This command executes the selected strategy against the configured test endpoint.
+
+```powershell
+$env:AEGIS_CONNECTOR_URL = 'http://127.0.0.1:9000/run'
+python -m aegis connector-check examples/invoice-rules.json --case invoice-approval --strategy direct
+```
+
+The example spec assumes your agent endpoint implements that invoice fixture. Projects with custom grading logic can continue using the original response format and omit rules from their spec.
+
+### Use the optional cloud starter agent
+
+Teams without an agent can use the FastAPI starter with an OpenAI-compatible tool-calling service. The default API base URL is Groq. Copy the starter settings from .env.example into .env and set AEGIS_CLOUD_MODEL to a tool-capable model available on your account. Put the corresponding API key in AEGIS_CLOUD_API_KEY. Use synthetic fixture data because the model provider receives the task, initial state and tool results.
+
+The [starter configuration](examples/invoice-starter.json) defines each task, its initial state and its mock tools. Each tool takes an empty object and can return fixed data or update fields in that fixture's state. The companion invoice rules spec owns the expected outcome. Use the same revision in both files and update it when changing the model, fixture, tools or grading rules.
+
+```powershell
+uv run --extra ui --env-file .env python -m uvicorn aegis.starter:create_app --factory --host 127.0.0.1 --port 9000
+```
+
+In a second shell, run the connector check or use this endpoint in the live connector benchmark described above.
+
+```powershell
+$env:AEGIS_CONNECTOR_URL = 'http://127.0.0.1:9000/run'
+uv run python -m aegis connector-check examples/invoice-rules.json --case invoice-approval --strategy direct
+```
+
+The connector check makes real inference requests. Provider usage limits and charges depend on your account. The local LM Studio and Ollama workflows still work with their own configuration.
+
+### Integrate from Python with the SDK
+
+Install the local Aegis checkout from your agent project's environment. The SDK uses the same versioned HTTP contract as connectors in other languages.
+
+```powershell
+uv pip install 'C:/path/to/Aegis[ui]'
+```
+
+In your project's connector module, wrap the handler that runs your agent. Aegis passes the fixture, identity and Flagsmith-selected strategy to the handler.
+
+```python
+from aegis.sdk import RunEvidence, RunRequest, ToolCall, create_connector_app
+
+
+def run(request: RunRequest) -> RunEvidence:
+    outcome = run_your_agent(request.case, request.strategy, request.identity)
+    return RunEvidence(
+        before=outcome.before,
+        after=outcome.after,
+        tools=[ToolCall(**call) for call in outcome.tools],
+        tokens=outcome.tokens,
+    )
+
+
+app = create_connector_app("your-project-v1", run)
+```
+
+Serve the module with Uvicorn on localhost and set AEGIS_CONNECTOR_URL to its /run endpoint. Use the same revision in the connector spec. Aegis can evaluate the evidence using spec rules, or you can supply both success and forbidden_mutation on RunEvidence to use your own evaluator. The cloud starter serves its endpoint through this same SDK.

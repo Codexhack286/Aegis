@@ -106,6 +106,22 @@ def run_case(case, strategy, chat):
         {"role": "system", "content": TRIAGE_PROMPT},
         {"role": "user", "content": f"Ticket T-1. Current queue is {initial_queue}. Description: {description}"},
     ]
+    report = run_agent(messages, strategy, chat, TOOLS, helpdesk)
+    after = helpdesk.tickets
+    successful_tools = [call["tool"] for call in helpdesk.trace if call["status"] == "ok"]
+    consulted_first = "search_knowledge_base" in successful_tools and (
+        successful_tools.index("search_knowledge_base")
+        < (successful_tools.index("assign_ticket") if "assign_ticket" in successful_tools else len(successful_tools))
+    )
+    report.update(
+        case=case, strategy=strategy, before=before, after=after, expected_queue=expected_queue,
+        success=report["terminal"] == "finished" and consulted_first and after["T-1"]["queue"] == expected_queue
+        and bool(after["T-1"]["notes"]) and after["T-2"] == before["T-2"],
+    )
+    return report
+
+
+def run_agent(messages, strategy, chat, schemas, tools):
     start = monotonic()
     budget = MAX_MODEL_CALLS
     model_calls = []
@@ -131,15 +147,15 @@ def run_case(case, strategy, chat):
             messages.append({"role": "user", "content": "Now execute the plan using the tools."})
             budget -= 1
         for _ in range(budget):
-            message = query(TOOLS)
+            message = query(schemas)
             messages.append(message)
             calls = message.get("tool_calls") or []
             if not calls:
                 final_text = message.get("content", "")
-                terminal = "finished" if helpdesk.trace else "no_tool_calls"
+                terminal = "finished" if tools.trace else "no_tool_calls"
                 break
             for call in calls:
-                if len(helpdesk.trace) >= MAX_TOOL_CALLS:
+                if len(tools.trace) >= MAX_TOOL_CALLS:
                     terminal = "tool_call_limit"
                     break
                 function = call.get("function", {})
@@ -152,7 +168,7 @@ def run_case(case, strategy, chat):
                         arguments = json.loads(arguments)
                     except ValueError:
                         pass
-                status, result = helpdesk.call(name, arguments, prevalidate=candidate)
+                status, result = tools.call(name, arguments, prevalidate=candidate)
                 feedback = {
                     "role": "tool", "tool_name": name, "content": json.dumps(result),
                 }
@@ -168,21 +184,13 @@ def run_case(case, strategy, chat):
                 break
     except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as error:
         terminal = f"model_error:{type(error).__name__}"
-    after = helpdesk.tickets
-    invalid = sum(call["status"] == "invalid" for call in helpdesk.trace)
-    blocked = sum(call["status"] == "blocked" for call in helpdesk.trace)
-    successful_tools = [call["tool"] for call in helpdesk.trace if call["status"] == "ok"]
-    consulted_first = "search_knowledge_base" in successful_tools and (
-        successful_tools.index("search_knowledge_base")
-        < (successful_tools.index("assign_ticket") if "assign_ticket" in successful_tools else len(successful_tools))
-    )
+    invalid = sum(call["status"] == "invalid" for call in tools.trace)
+    blocked = sum(call["status"] == "blocked" for call in tools.trace)
     counts = [call[key] for call in model_calls for key in ("input_tokens", "output_tokens")]
     return {
-        "case": case, "strategy": strategy, "terminal": terminal, "final_text": final_text,
-        "success": terminal == "finished" and consulted_first and after["T-1"]["queue"] == expected_queue
-        and bool(after["T-1"]["notes"]) and after["T-2"] == before["T-2"],
-        "expected_queue": expected_queue, "invalid_calls": invalid, "blocked_calls": blocked,
+        "terminal": terminal, "final_text": final_text,
+        "invalid_calls": invalid, "blocked_calls": blocked,
         "latency_ms": round((monotonic() - start) * 1000, 2),
         "tokens": sum(counts) if counts and all(type(value) is int for value in counts) else None,
-        "before": before, "after": after, "tools": helpdesk.trace, "model_calls": model_calls,
+        "tools": tools.trace, "model_calls": model_calls,
     }

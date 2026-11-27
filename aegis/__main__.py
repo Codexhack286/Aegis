@@ -2,8 +2,9 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from uuid import uuid4
 
-from aegis import benchmark
+from aegis import benchmark, connector
 from aegis.core import CASES, STRATEGIES
 from aegis.experiment import Experiment
 from aegis.runner import MODEL_PROVIDERS, execute
@@ -54,6 +55,10 @@ def main():
     command = commands.add_parser("flagsmith-smoke")
     command.add_argument("--batch", required=True, help="Fresh prefix in a dedicated smoke-test experiment.")
     command.add_argument("--count", type=int, default=40)
+    command = commands.add_parser("connector-check", help="Check one fixture without a Flagsmith experiment.")
+    command.add_argument("spec", type=Path)
+    command.add_argument("--case", required=True)
+    command.add_argument("--strategy", choices=STRATEGIES, required=True)
     command = commands.add_parser("benchmark-prepare", help="Freeze the workload and review thresholds.")
     command.add_argument("manifest")
     command.add_argument("--batch", required=True)
@@ -83,6 +88,14 @@ def main():
             command.add_argument("--reason", required=True)
     args = parser.parse_args()
     try:
+        if args.mode == "connector-check":
+            revision, cases, rules = connector.load_spec(args.spec)
+            if args.case not in cases:
+                raise ValueError("The fixture is not listed in the connector spec.")
+            result = connector.run(args.case, args.strategy, f"connector-check-{uuid4()}",
+                                   revision, rules[args.case] if rules else None)
+            print(json.dumps(result, indent=2))
+            return 0 if result["success"] else 1
         if args.mode == "flagsmith-smoke":
             if args.count < 4:
                 parser.error("--count must be at least 4")

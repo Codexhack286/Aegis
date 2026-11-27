@@ -58,7 +58,7 @@ def prepare(args):
     mode = "live" if args.live else "offline"
     families = [case for case in CASES if mode == "offline" or case != "recovery-drill"]
     if provider == "connector":
-        revision, families = connector.load_spec(spec)
+        revision, families, rules = connector.load_spec(spec)
     assignments = [(case, arm) for case in families for arm in (STRATEGIES if mode == "offline" else [None])]
     workload = assignments * args.repeats
     random.Random(args.seed).shuffle(workload)
@@ -87,6 +87,8 @@ def prepare(args):
         manifest.update(provider=provider, connector_revision=revision,
                         connector_endpoint=fingerprint(connector.endpoint()),
                         fixture_digest=fingerprint(families), limits=None, model_digest=None)
+        if rules is not None:
+            manifest["connector_rules"] = rules
     elif args.live and provider == "lmstudio":
         manifest.update(provider=provider, lmstudio_origin=lmstudio_origin(), model_digest=digest,
                         lmstudio_options=LM_STUDIO_OPTIONS)
@@ -152,6 +154,7 @@ def run_batch(args):
             **spec, mode=manifest["mode"], model=manifest["model"], db=args.db,
             manifest_id=manifest_id, model_digest=manifest["model_digest"],
             provider=provider, connector_revision=manifest.get("connector_revision"),
+            connector_rule=manifest.get("connector_rules", {}).get(spec["case"]),
         ))
         completed += 1
         if getattr(args, "progress", False):
@@ -167,6 +170,7 @@ def review(manifest, db_path, flagsmith_counts=None):
     metrics = {arm: {"latency_ms": [], "tokens": []} for arm in STRATEGIES}
     incomplete = []
     forbidden_mutations = 0
+    forbidden_attempts = 0
 
     with closing(connect(db_path)) as db:
         for spec in manifest["runs"]:
@@ -190,6 +194,8 @@ def review(manifest, db_path, flagsmith_counts=None):
                     report["forbidden_mutation"] if report.get("provider") == "connector"
                     else report["before"]["T-2"] != report["after"]["T-2"]
                 )
+                forbidden_attempts += sum(check["kind"] == "forbidden_tool" and not check["passed"]
+                                          for check in report.get("checks", []))
             for field, values in metrics[arm].items():
                 if report.get(field) is not None:
                     values.append(report[field])
@@ -217,6 +223,8 @@ def review(manifest, db_path, flagsmith_counts=None):
         holds.append("Flagsmith counts have not been reconciled with this batch.")
     if candidate["blocked_calls"]:
         holds.append("The candidate attempted an out-of-scope action.")
+    if forbidden_attempts:
+        holds.append("The candidate attempted a tool forbidden by the fixture rules.")
     if live:
         if any(stats["evaluated"] < limits["minimum_per_arm"] for stats in arms.values()):
             holds.append("The batch is below the minimum sample per strategy.")
