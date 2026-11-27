@@ -134,13 +134,19 @@ class InvoiceConnector(unittest.TestCase):
             ("invoice-submit", ["submit_invoice", "submit_invoice"], False),
             ("invoice-submit", [], False),
             ("invoice-approval", ["approve_invoice"], False),
-            ("invoice-approval", ["approve_invoice", "check_receipt", "approve_invoice"], False),
+            ("invoice-approval", ["approve_invoice", "check_receipt", "approve_invoice"], True),
+            ("invoice-receipt-mismatch", ["check_receipt", "approve_invoice"], False),
+            ("invoice-receipt-mismatch", [], False),
             ("invoice-approval", ["check_receipt", "approve_invoice", "send_payment"], False),
             ("invoice-approval", ["check_receipt", "approve_invoice"], True),
         ):
             with self.subTest(case=case, actions=actions):
                 def chat(messages, tools):
                     completed = sum(message["role"] == "tool" for message in messages)
+                    offered = {tool["function"]["name"] for tool in tools}
+                    self.assertNotIn("send_payment", offered)
+                    if case == "invoice-receipt-mismatch" or not completed:
+                        self.assertNotIn("approve_invoice", offered)
                     calls = [{
                         "function": {"name": action, "arguments": {}},
                     } for action in actions[completed:completed + 1]]
@@ -155,13 +161,90 @@ class InvoiceConnector(unittest.TestCase):
                 ):
                     report = connector.run(case, "direct", "test", revision, rules[case])
                 self.assertIs(report["success"], expected)
+                if actions and actions[0] == "approve_invoice":
+                    self.assertEqual(report["tools"][0]["status"], "blocked")
+                if case == "invoice-receipt-mismatch":
+                    if actions:
+                        self.assertEqual(report["tools"][-1]["status"], "blocked")
+                    else:
+                        self.assertIn("required_tool_order", [
+                            check["kind"] for check in report["checks"] if not check["passed"]
+                        ])
+                    self.assertEqual(report["after"], report["before"])
+                    self.assertFalse(report["forbidden_mutation"])
+                if case == "invoice-approval" and actions == ["approve_invoice"]:
+                    self.assertEqual(report["after"], report["before"])
                 if "send_payment" in actions:
-                    self.assertTrue(report["forbidden_mutation"])
+                    self.assertEqual(report["tools"][-1]["status"], "blocked")
+                    self.assertEqual(report["after"]["payment_status"], "unpaid")
+                    self.assertFalse(report["forbidden_mutation"])
                 if case == "invoice-retry":
                     self.assertEqual(report["after"]["invoices"], ["INV-1"])
                     self.assertEqual(report["tools"][0]["result"]["status"], "timeout")
                     if expected:
                         self.assertEqual(report["tools"][1]["result"]["status"], "submitted")
+
+
+    @unittest.skipUnless(find_spec("fastapi"), "Requires the ui extra")
+    def test_one_turn_invoice_repair(self):
+        from aegis.sdk import RunRequest
+        from aegis.starter import create_app
+
+        revision, _, rules = connector.load_spec(Path("examples/invoice/rules.json"))
+        repair = "plan_validate_repair"
+        for case, strategy, action, expected, turns in (
+            ("invoice-approval", "plan_validate", "approve_invoice", False, 0),
+            ("invoice-approval", repair, "approve_invoice", True, 1),
+            ("invoice-approval", repair, "send_payment", False, 1),
+            ("invoice-approval", repair, None, False, 1),
+            ("invoice-receipt-mismatch", repair, "approve_invoice", True, 0),
+            ("invoice-retry", repair, "approve_invoice", True, 0),
+        ):
+            with self.subTest(case=case, strategy=strategy, action=action):
+                scoped_turns = []
+
+                def chat(messages, tools):
+                    names = [tool["function"]["name"] for tool in tools]
+                    previous = sum(message["role"] == "tool" for message in messages)
+                    selected = None
+                    if names == ["approve_invoice"]:
+                        scoped_turns.append(names)
+                        selected = action
+                    elif names == ["submit_invoice"] and previous < 2:
+                        selected = "submit_invoice"
+                    elif "check_receipt" in names and not previous:
+                        selected = "check_receipt"
+                    calls = [{"function": {"name": selected, "arguments": {}}}] if selected else []
+                    return {"message": {
+                        "role": "assistant", "content": "Tool: None" if not calls else "", "tool_calls": calls,
+                    }}
+
+                handler = endpoint(create_app(chat=chat), "/run")
+                def transport(request, *, timeout):
+                    return BytesIO(json.dumps(handler(RunRequest.model_validate_json(request.data))).encode())
+
+                with patch("aegis.connector.urlopen", side_effect=transport), patch.dict(
+                    "os.environ", {"AEGIS_CONNECTOR_URL": "http://localhost/run"}
+                ):
+                    report = connector.run(case, strategy, "repair-test", revision, rules[case])
+                    if case == "invoice-approval" and strategy == repair and expected:
+                        comparison = regression.compare([case], 1, None,
+                            spec=Path("examples/invoice/rules.json"), arms=("plan_validate", repair))
+                        self.assertEqual(comparison["arms"], ["plan_validate", repair])
+                        self.assertEqual(comparison["verdict"], "pass")
+                        self.assertEqual(comparison["cases"][0]["outcomes"][repair][0]["repair_turns"], 1)
+                        self.assertIn("Median latency", regression.markdown(comparison))
+                self.assertEqual(report["repair_turns"], turns)
+                self.assertIs(report["success"], expected)
+                if case == "invoice-retry":
+                    self.assertEqual(report["after"]["invoices"], ["INV-1"])
+                else:
+                    self.assertEqual(report["after"]["payment_status"], "unpaid")
+                    if not expected or case == "invoice-receipt-mismatch":
+                        self.assertEqual(report["after"]["invoice_status"], "open")
+                if action == "send_payment":
+                    self.assertEqual(report["tools"][-1]["status"], "blocked")
+                self.assertEqual(len(scoped_turns), turns + int(case == "invoice-approval" and strategy == repair and expected))
 
 
 class RetailExchangeReplay(unittest.TestCase):

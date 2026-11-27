@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 class RunRequest(BaseModel):
     version: Literal[1]
     case: str
-    strategy: Literal["direct", "plan_validate"]
+    strategy: Literal["direct", "plan_validate", "plan_validate_repair"]
     identity: str
     revision: str
 
@@ -26,6 +26,7 @@ class RunEvidence(BaseModel):
     after: dict[str, Any] | None = None
     tools: list[ToolCall] = Field(default_factory=list)
     tokens: int | None = Field(default=None, ge=0)
+    repair_turns: Literal[0, 1] | None = None
     summary: str | None = None
     terminal: str = "finished"
     success: bool | None = None

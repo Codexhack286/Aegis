@@ -16,26 +16,53 @@ from aegis.runner import lmstudio, openai_chat
 from aegis.sdk import RunEvidence, RunRequest, create_connector_app
 
 
+class RequiredToolResult(BaseModel):
+    tool: str
+    result: dict[str, Any] = Field(min_length=1)
+
+
 class Tool(BaseModel):
     description: str
     result: dict[str, Any]
     updates: dict[str, Any] = Field(default_factory=dict)
     append: dict[str, Any] = Field(default_factory=dict)
     first_response: dict[str, Any] | None = None
+    requires_result: RequiredToolResult | None = None
+    disabled: bool = False
+
+
+class RepairCondition(BaseModel):
+    tool: str
+    pending_state: dict[str, Any] = Field(min_length=1)
+    evidence_tool: str
+    evidence_result: dict[str, Any] = Field(min_length=1)
 
 
 class Fixture(BaseModel):
     task: str
     state: dict[str, Any]
     tools: dict[str, Tool]
+    repair: RepairCondition | None = None
 
     @model_validator(mode="after")
-    def validate_append_targets(self):
+    def validate_tool_configuration(self):
         targets = {key for tool in self.tools.values() for key in tool.append}
         if any(not isinstance(self.state.get(key), list) for key in targets) or any(
             targets.intersection(tool.updates) for tool in self.tools.values()
         ):
             raise ValueError("Append targets must be lists in initial state with no replacement updates.")
+        for name, tool in self.tools.items():
+            required = tool.requires_result
+            if required and (required.tool == name or required.tool not in self.tools
+                             or self.tools[required.tool].disabled):
+                raise ValueError("Tool result requirements must reference another enabled fixture tool.")
+        if self.repair and (
+            self.repair.tool not in self.tools or self.repair.evidence_tool not in self.tools
+            or self.tools[self.repair.tool].disabled or self.tools[self.repair.evidence_tool].disabled
+            or self.repair.tool == self.repair.evidence_tool
+            or self.repair.pending_state.keys() - self.state.keys()
+        ):
+            raise ValueError("Repair requires distinct fixture tools and known pending state keys.")
         return self
 
 
@@ -50,6 +77,7 @@ class FixtureTools:
         self.trace = []
         self.tools = fixture.tools
         self.committed = set()
+        self.repair = fixture.repair
         self.schemas = [
             {"type": "function", "function": {
                 "name": name, "description": tool.description,
@@ -58,11 +86,36 @@ class FixtureTools:
             for name, tool in fixture.tools.items()
         ]
 
+    def has_tool_result(self, name, expected):
+        latest = next((call for call in reversed(self.trace) if call["tool"] == name), None)
+        return (
+            latest is not None and latest["status"] == "ok"
+            and json.dumps(latest["result"], sort_keys=True) == json.dumps(expected, sort_keys=True)
+        )
+
+    def available_tools(self):
+        return [schema for schema in self.schemas if self.tool_is_available(schema["function"]["name"])]
+
+    def tool_is_available(self, name):
+        tool = self.tools[name]
+        required = tool.requires_result
+        return not tool.disabled and (required is None or self.has_tool_result(required.tool, required.result))
+
+    def pending_repair_tool(self):
+        rule = self.repair
+        if rule is None or not all(self.state[key] == value for key, value in rule.pending_state.items()):
+            return None
+        if self.has_tool_result(rule.evidence_tool, rule.evidence_result):
+            return rule.tool
+        return None
+
     def call(self, name, arguments, *, prevalidate):
-        if name not in self.tools or arguments != {}:
+        tool = self.tools.get(name)
+        if tool is None or arguments != {}:
             status, result = "invalid", {"error": "Use a listed tool with an empty arguments object."}
+        elif not self.tool_is_available(name):
+            status, result = "blocked", {"error": "This tool is unavailable for the current task or state."}
         else:
-            tool = self.tools[name]
             result = tool.result
             if tool.first_response is None or name not in self.committed:
                 self.state.update(deepcopy(tool.updates))
@@ -90,12 +143,14 @@ def create_app(config_path=None, *, chat=None):
              "Use an empty arguments object for each tool. Reply briefly after executing the task."},
             {"role": "user", "content": f"{fixture.task}\nInitial state: {json.dumps(fixture.state)}"},
         ]
-        result = run_agent(messages, request.strategy, chat, tools.schemas, tools)
+        result = run_agent(messages, request.strategy, chat, tools.schemas, tools,
+                           repair=tools.pending_repair_tool, available_tools=tools.available_tools)
         if result["terminal"].startswith("model_error:"):
             raise HTTPException(502, "Inference failed. Check provider configuration and availability.")
         return RunEvidence(
             before=fixture.state, after=tools.state, tools=result["tools"],
             tokens=result["tokens"], summary=result["final_text"], terminal=result["terminal"],
+            repair_turns=result["repair_turns"],
         )
 
     return create_connector_app(config.revision, run)

@@ -1,5 +1,28 @@
 # Aegis next phase
 
+## One-turn approval repair
+
+The live `invoice-agent-v2` comparison recorded two premature stops on invoice approval with `plan_validate`. The focused trace showed `check_receipt` returning a match and the model ending its turn while the invoice remained open. The `invoice-agent-v3` starter adds `plan_validate_repair` for connector experiments.
+
+When the model stops, the starter reads the current invoice state and the latest receipt result. A matching receipt and an open, unpaid invoice allow one more model turn within the existing budget. Only one approval call is available during that turn. A mismatched receipt skips the repair, and the evaluator checks that the invoice stays open and unpaid. Reports include observed repair turns and latency.
+
+The live revision 3 mismatch trials showed that all strategies could approve a mismatched receipt during normal execution. Revision 4 checks the latest receipt result inside the approval tool before changing state. A blocked approval attempt on the mismatch fixture still fails its action policy, while the state checks confirm that the invoice stayed open and unpaid.
+
+In the live revision 4 comparisons, all eight mismatch trials preserved protected state. The candidate had three policy failures across four mismatch trials. Two listed a forbidden tool attempt as the first failure and one listed the required receipt check. Revision 5 offers approval only after a matching receipt check and disables payment in the invoice approval fixtures. The connector still blocks an unavailable tool if the model requests it directly.
+
+In a controlled revision 5 comparison against `plan_validate`, the repair passed both valid approval trials, both mismatch trials, and both timeout retry trials. Injected attempts to approve a mismatched receipt or send payment were blocked, while an injected early stop failed the receipt-check requirement. The revision 5 live model comparison is pending.
+
+Restart the invoice connector to load revision 5. Run the comparison below from the repository root with the connector listening on port 9000. The default baseline is `direct`. Add `--baseline plan_validate` and use a second output file to isolate the effect of adding the repair turn.
+
+```powershell
+$env:AEGIS_CONNECTOR_URL = 'http://127.0.0.1:9000/run'
+uv run python -m aegis case-compare --connector-spec examples/invoice/rules.json `
+    --candidate plan_validate_repair --repeats 2 --case invoice-approval `
+    --case invoice-receipt-mismatch --case invoice-retry > repair-regression.json
+```
+
+Load either JSON result in **Review a paired regression report** to see per-arm failed checks, blocked calls, and protected-state mutations. For a Markdown table with median trial latency, rerun with `--format markdown` and redirect to a separate file.
+
 ## Available in the prototype
 
 Select a built-in run in the dashboard and choose **Preview and regrade bundle** to see the first failing check and download the projected evidence. The bundle contains queue values, rule-relevant facts and known successful tool names. The saved examples came from Qwen runs `qwen-measured-01-0003` and `qwen-measured-01-0005`.

@@ -121,6 +121,9 @@ def run(case, strategy, identity, revision, rule=None):
     tokens = result.get("tokens")
     if tokens is not None and (type(tokens) is not int or tokens < 0):
         raise ValueError("Connector tokens must be a nonnegative integer or null.")
+    repair_turns = result.get("repair_turns")
+    if repair_turns is not None and (type(repair_turns) is not int or repair_turns not in (0, 1)):
+        raise ValueError("Connector repair_turns must be 0, 1 or null.")
     if result.get("summary") is not None and not isinstance(result["summary"], str):
         raise ValueError("Connector summary must be a string or null.")
     terminal = result.get("terminal", "finished")
@@ -134,6 +137,8 @@ def run(case, strategy, identity, revision, rule=None):
         "tokens": tokens, "final_text": result.get("summary"),
         "before": result.get("before"), "after": result.get("after"), "tools": tools,
     }
+    if repair_turns is not None:
+        report["repair_turns"] = repair_turns
     if rule is None:
         report.update(success=result["success"] and not result["forbidden_mutation"],
                       forbidden_mutation=result["forbidden_mutation"])

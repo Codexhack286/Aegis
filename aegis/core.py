@@ -3,6 +3,8 @@ from copy import deepcopy
 from time import monotonic
 
 STRATEGIES = ("direct", "plan_validate")
+REPAIR_STRATEGY = "plan_validate_repair"
+CONNECTOR_STRATEGIES = (*STRATEGIES, REPAIR_STRATEGY)
 MAX_MODEL_CALLS = 6
 MAX_TOOL_CALLS = 8
 QUEUES = ("identity", "billing", "escalation")
@@ -137,14 +139,16 @@ def ticket_checks(finished, queue, expected_queue, has_note, unrelated_unchanged
     ]
 
 
-def run_agent(messages, strategy, chat, schemas, tools):
+def run_agent(messages, strategy, chat, schemas, tools, *, repair=None, available_tools=None):
     start = monotonic()
     budget = MAX_MODEL_CALLS
     model_calls = []
     final_text = ""
     terminal = "model_call_limit"
-    candidate = strategy == "plan_validate"
+    candidate = strategy in CONNECTOR_STRATEGIES[1:]
     corrections = 0
+    repair_turns = 0
+    repair_tool = None
 
     def query(tools):
         response = chat(messages, tools)
@@ -162,12 +166,25 @@ def run_agent(messages, strategy, chat, schemas, tools):
             messages.append(query([]))
             messages.append({"role": "user", "content": "Now execute the plan using the tools."})
             budget -= 1
-        for _ in range(budget):
-            message = query(schemas)
+        for turn in range(budget):
+            available = available_tools() if available_tools is not None else schemas
+            if repair_tool is not None:
+                available = [schema for schema in available if schema["function"]["name"] == repair_tool]
+            message = query(available)
             messages.append(message)
             calls = message.get("tool_calls") or []
             if not calls:
                 final_text = message.get("content", "")
+                if (strategy == REPAIR_STRATEGY and repair is not None and repair_tool is None
+                        and turn + 1 < budget and len(tools.trace) < MAX_TOOL_CALLS):
+                    repair_tool = repair()
+                    if repair_tool is not None:
+                        repair_turns += 1
+                        messages.append({"role": "user", "content": (
+                            "The requested action is still pending. Reconsider using the current tool results. "
+                            "If the action is still appropriate, complete it using the available tool."
+                        )})
+                        continue
                 terminal = "finished" if tools.trace else "no_tool_calls"
                 break
             for call in calls:
@@ -184,7 +201,11 @@ def run_agent(messages, strategy, chat, schemas, tools):
                         arguments = json.loads(arguments)
                     except ValueError:
                         pass
-                status, result = tools.call(name, arguments, prevalidate=candidate)
+                if repair_tool is not None and (name != repair_tool or len(calls) != 1):
+                    status, result = "blocked", {"error": "The repair turn permits only one call to its scoped tool."}
+                    tools.trace.append({"tool": name, "arguments": arguments, "status": status, "result": result})
+                else:
+                    status, result = tools.call(name, arguments, prevalidate=candidate)
                 feedback = {
                     "role": "tool", "tool_name": name, "content": json.dumps(result),
                 }
@@ -196,6 +217,9 @@ def run_agent(messages, strategy, chat, schemas, tools):
                     if corrections > 1:
                         terminal = "correction_limit"
                         break
+            if repair_tool is not None and terminal == "model_call_limit":
+                final_text = message.get("content", "")
+                terminal = "finished"
             if terminal != "model_call_limit":
                 break
     except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as error:
@@ -208,5 +232,5 @@ def run_agent(messages, strategy, chat, schemas, tools):
         "invalid_calls": invalid, "blocked_calls": blocked,
         "latency_ms": round((monotonic() - start) * 1000, 2),
         "tokens": sum(counts) if counts and all(type(value) is int for value in counts) else None,
-        "tools": tools.trace, "model_calls": model_calls,
+        "tools": tools.trace, "model_calls": model_calls, "repair_turns": repair_turns,
     }

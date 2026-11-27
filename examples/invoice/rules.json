@@ -1,7 +1,7 @@
 {
-  "revision": "invoice-agent-v2",
+  "revision": "invoice-agent-v5",
   "trial_isolation": "fresh_per_request",
-  "cases": ["invoice-approval", "invoice-submit", "invoice-retry"],
+  "cases": ["invoice-approval", "invoice-submit", "invoice-retry", "invoice-receipt-mismatch"],
   "rules": {
     "invoice-submit": {
       "expected_state": {"invoices": ["INV-1"]}
@@ -9,6 +9,12 @@
     "invoice-retry": {
       "expected_state": {"invoices": ["INV-1"]},
       "required_tool_order": ["submit_invoice", "submit_invoice"]
+    },
+    "invoice-receipt-mismatch": {
+      "expected_state": {"invoice_status": "open"},
+      "required_tool_order": ["check_receipt"],
+      "forbidden_tools": ["approve_invoice", "send_payment"],
+      "unchanged_state_keys": ["invoice_status", "payment_status"]
     },
     "invoice-approval": {
       "expected_state": {"invoice_status": "approved"},

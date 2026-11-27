@@ -2,13 +2,14 @@
 
 import json
 import sqlite3
+from statistics import median
 from contextlib import closing
 from functools import partial
 from pathlib import Path
 from uuid import uuid4
 
 from aegis import connector
-from aegis.core import CASES, QUEUES, STRATEGIES, TOOL_PARAMETERS, run_case, ticket_checks
+from aegis.core import CASES, QUEUES, REPAIR_STRATEGY, STRATEGIES, TOOL_PARAMETERS, run_case, ticket_checks
 from aegis.runner import check_lmstudio_model, lmstudio, scripted
 
 POLICY = "helpdesk-v1"
@@ -97,7 +98,11 @@ def regrade(bundle):
     }
 
 
-def compare(cases, repeats, model, *, spec=None):
+def compare(cases, repeats, model, *, spec=None, arms=STRATEGIES):
+    if arms[0] == arms[1]:
+        raise ValueError("Choose distinct baseline and candidate strategies.")
+    if REPAIR_STRATEGY in arms and spec is None:
+        raise ValueError("The repair strategy requires a connector spec.")
     revision = None
     if spec is not None:
         revision, supported, rules = connector.load_spec(spec, require_isolation=True)
@@ -108,10 +113,10 @@ def compare(cases, repeats, model, *, spec=None):
         check_lmstudio_model(model)
     rows = []
     for case in cases:
-        outcomes = {strategy: [] for strategy in STRATEGIES}
+        outcomes = {strategy: [] for strategy in arms}
         initial_states = []
         for trial in range(repeats):
-            order = STRATEGIES if (len(rows) * repeats + trial) % 2 == 0 else reversed(STRATEGIES)
+            order = arms if (len(rows) * repeats + trial) % 2 == 0 else reversed(arms)
             for strategy in order:
                 if spec is not None:
                     outcome, before = connector_trial(case, strategy, revision, rules[case])
@@ -129,7 +134,7 @@ def compare(cases, repeats, model, *, spec=None):
                     "first_failure": grade["first_failure"],
                     "bundle": bundle,
                 })
-        baseline, candidate = (outcomes[strategy] for strategy in STRATEGIES)
+        baseline, candidate = (outcomes[strategy] for strategy in arms)
         missing = any(run["success"] is None for runs in outcomes.values() for run in runs)
         control_passes = sum(run["success"] is True for run in baseline)
         candidate_passes = sum(run["success"] is True for run in candidate)
@@ -148,6 +153,7 @@ def compare(cases, repeats, model, *, spec=None):
         "version": 1, "verdict": verdict, "model": model,
         "source": "connector" if spec is not None else "lmstudio" if model else "scripted",
         "connector_revision": revision,
+        "arms": list(arms),
         "distinct_cases": len(rows), "repeats": repeats, "cases": rows,
     }
 
@@ -157,27 +163,32 @@ def connector_trial(case, strategy, revision, rule):
         report = connector.run(case, strategy, f"case-compare-{uuid4()}", revision, rule)
     except (OSError, ValueError):
         return {"success": None, "first_failure": "Connector evidence unavailable"}, None
-    failed = next((check["kind"] for check in report["checks"] if not check["passed"]), None)
+    failed = list(dict.fromkeys(check["kind"] for check in report["checks"] if not check["passed"]))
     terminal = report["terminal"]
     return {
         "success": None if terminal == "connector_error" or terminal.startswith("model_error:") else report["success"],
-        "first_failure": failed or ("Agent did not finish" if terminal != "finished" else None),
+        "first_failure": next(iter(failed), None) or ("Agent did not finish" if terminal != "finished" else None),
+        "failed_checks": failed,
+        "blocked_calls": report.get("blocked_calls"),
         "forbidden_mutation": report["forbidden_mutation"],
+        "latency_ms": report.get("latency_ms"),
+        "repair_turns": report.get("repair_turns"),
     }, report["before"]
 
 
 def markdown(comparison):
+    arms = comparison.get("arms", STRATEGIES)
     lines = [
         "# Aegis regression check", "",
         f"**{comparison['verdict'].replace('_', ' ').capitalize()}** across "
         f"{comparison['distinct_cases']} fixtures, {comparison['repeats']} trials per arm and fixture.", "",
         f"Source: {comparison['source']}", "",
-        "| Fixture | Direct passes | Plan and validate passes | Decision |",
+        f"| Fixture | {arms[0]} passes | {arms[1]} passes | Decision |",
         "| --- | ---: | ---: | --- |",
     ]
     for row in comparison["cases"]:
         counts = []
-        for strategy in STRATEGIES:
+        for strategy in arms:
             outcomes = row["outcomes"][strategy]
             passed = sum(run["success"] is True for run in outcomes)
             available = sum(run["success"] is not None for run in outcomes)
@@ -186,7 +197,29 @@ def markdown(comparison):
     for row in comparison["cases"]:
         if row["state_mismatch"]:
             lines.append(f"\n- `{row['case']}` returned different starting states.")
-        failures = dict.fromkeys(run["first_failure"] for run in row["outcomes"]["plan_validate"] if run["first_failure"])
-        if failures:
-            lines.append(f"\n- `{row['case']}` candidate checks: {', '.join(failures)}.")
+        for strategy in arms:
+            outcomes = row["outcomes"][strategy]
+            failures = dict.fromkeys(check for run in outcomes for check in [
+                *run.get("failed_checks", []), run["first_failure"],
+            ] if check)
+            blocked = sum(bool(run.get("blocked_calls")) for run in outcomes)
+            mutations = sum(bool(run.get("forbidden_mutation")) for run in outcomes)
+            notes = []
+            if failures:
+                notes.append(f"failed checks: {', '.join(failures)}")
+            if blocked:
+                notes.append(f"trials with blocked calls: {blocked}")
+            if mutations:
+                notes.append(f"trials with protected-state mutations: {mutations}")
+            if notes:
+                lines.append(f"\n- `{row['case']}` / `{strategy}`. {'. '.join(notes)}.")
+    if comparison["source"] == "connector":
+        lines.extend(["", "| Fixture | Strategy | Median latency (ms) | Repair turns |", "| --- | --- | ---: | ---: |"])
+        for row in comparison["cases"]:
+            for strategy in arms:
+                outcomes = row["outcomes"][strategy]
+                latency = [run["latency_ms"] for run in outcomes if run.get("latency_ms") is not None]
+                repairs = [run["repair_turns"] for run in outcomes if run.get("repair_turns") is not None]
+                lines.append(f"| {row['case']} | {strategy} | {median(latency) if latency else '-'} "
+                             f"| {sum(repairs) if repairs else '-'} |")
     return "\n".join(lines)

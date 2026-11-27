@@ -5,7 +5,7 @@ import sys
 from uuid import uuid4
 
 from aegis import benchmark, connector, regression
-from aegis.core import CASES, STRATEGIES
+from aegis.core import CASES, CONNECTOR_STRATEGIES, STRATEGIES
 from aegis.experiment import Experiment
 from aegis.runner import MODEL_PROVIDERS, execute
 
@@ -58,7 +58,7 @@ def main():
     command = commands.add_parser("connector-check", help="Check one fixture without a Flagsmith experiment.")
     command.add_argument("spec", type=Path)
     command.add_argument("--case", required=True)
-    command.add_argument("--strategy", choices=STRATEGIES, required=True)
+    command.add_argument("--strategy", choices=CONNECTOR_STRATEGIES, required=True)
     command = commands.add_parser("case-export", help="Export sanitized helpdesk evidence from the ledger.")
     command.add_argument("identity")
     command.add_argument("--db", default="aegis.sqlite3")
@@ -67,6 +67,8 @@ def main():
     command = commands.add_parser("case-compare", help="Run both strategies on isolated fixtures.")
     command.add_argument("--case", action="append", required=True)
     command.add_argument("--repeats", type=int, default=1)
+    command.add_argument("--baseline", choices=STRATEGIES, default="direct")
+    command.add_argument("--candidate", choices=CONNECTOR_STRATEGIES[1:], default="plan_validate")
     source = command.add_mutually_exclusive_group()
     source.add_argument("--model", help="Exact LM Studio model ID. Omit for scripted runs.")
     source.add_argument("--connector-spec", type=Path, help="Connector spec declaring fresh state per trial.")
@@ -118,7 +120,8 @@ def main():
                 cases = list(dict.fromkeys(args.case))
                 if args.connector_spec is None and any(case not in CASES for case in cases):
                     raise ValueError(f"Choose a built-in fixture: {', '.join(CASES)}.")
-                result = regression.compare(cases, args.repeats, args.model, spec=args.connector_spec)
+                result = regression.compare(cases, args.repeats, args.model, spec=args.connector_spec,
+                                            arms=(args.baseline, args.candidate))
             except (OSError, RuntimeError, ValueError) as error:
                 print(f"Aegis: {error}", file=sys.stderr)
                 return 2
