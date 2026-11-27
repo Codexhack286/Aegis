@@ -2,6 +2,18 @@
 
 A helpdesk agent can say “I routed the ticket” while leaving it in the wrong queue. Aegis asks whether a proposed strategy actually fixes errors like this, and what the fix costs in latency, tokens and extra tool calls. Aegis includes a scripted recovery drill and a benchmark runner for a live Flagsmith experiment.
 
+## Repository layout
+
+| Directory | Contents |
+| --- | --- |
+| `aegis/` | Python backend, CLI, benchmark engine, connector, and SDK. |
+| `ui/src/` | React entry point, dashboard workspace, and components for review and trace inspection. |
+| `examples/invoice/` | Invoice starter fixture and its matching evaluator rules. |
+| `benchmarks/qwen-measured-01/` | Frozen manifest, reconciled Flagsmith counts, and saved rollout decision. |
+| `tests/` | Python regression tests. |
+
+Run the documented commands from the repository root. The default SQLite ledger is `aegis.sqlite3` in that directory.
+
 ## Hackathon decision
 
 Enter **AI Agents and Feature Flags**. The user is an engineer deciding whether to expand a new tool-use strategy. Show one release decision from the flag assignment through to the ticket mutation that explains it. The benchmark uses synthetic tickets, so the conclusion applies to this workload. Production impact would need separate evidence.
@@ -54,9 +66,9 @@ Flagsmith assigned 40 synthetic helpdesk runs across five fixtures. Both strateg
 
 **Release decision in Aegis: Hold the candidate and keep direct as the baseline.** The fixture-adjusted change was −30 percentage points against a target of +5. In all three failed password-reset runs, the candidate reached the expected queue but assigned the ticket before looking up routing rules. Trace `qwen-measured-01-0005` shows this sequence. The three other failures came from unclear requests that the candidate left unassigned. This result applies to the tested model, strategies, and repeated synthetic fixtures.
 
-- [Frozen benchmark manifest](qwen-measured.json)
-- [Reconciled Flagsmith counts](qwen-measured-01-flagsmith-counts.json)
-- [Saved decision and review snapshot](qwen-measured-01-decision.json)
+- [Frozen benchmark manifest](benchmarks/qwen-measured-01/manifest.json)
+- [Reconciled Flagsmith counts](benchmarks/qwen-measured-01/flagsmith-counts.json)
+- [Saved decision and review snapshot](benchmarks/qwen-measured-01/decision.json)
 
 ## Delivery sequence
 
@@ -172,9 +184,9 @@ Start a fresh Flagsmith experiment with the same flag and metric as the smoke te
 
 ```powershell
 $gguf = Join-Path $env:USERPROFILE '.lmstudio\models\Qwen\Qwen2.5-3B-Instruct-GGUF\qwen2.5-3b-instruct-q4_k_m.gguf'
-uv run --extra experiment --env-file .env python -m aegis benchmark-prepare qwen-measured.json --batch qwen-measured-01 --live --provider lmstudio --model qwen2.5-3b-instruct --model-file $gguf --repeats 6
-uv run --extra experiment --env-file .env python -m aegis benchmark-run qwen-measured.json --model-file $gguf --progress
-uv run --env-file .env python -m aegis benchmark-review qwen-measured.json
+uv run --extra experiment --env-file .env python -m aegis benchmark-prepare new-measurement.json --batch new-measured-01 --live --provider lmstudio --model qwen2.5-3b-instruct --model-file $gguf --repeats 6
+uv run --extra experiment --env-file .env python -m aegis benchmark-run new-measurement.json --model-file $gguf --progress
+uv run --env-file .env python -m aegis benchmark-review new-measurement.json
 ```
 
 Preparation and execution check that LM Studio lists the model ID. The manifest fingerprints the GGUF you supply, and execution verifies that file before enrolling any identities. Use the file that is actually loaded for that API ID, and keep the LM Studio model and runtime settings fixed through the batch. The API model list does not attest to the loaded file hash. The manifest stores the hash, provider and decoding settings without the local file path.
@@ -225,7 +237,7 @@ The connector owns its evaluator. Aegis measures the HTTP round-trip latency and
 
 ### Bring an agent and let Aegis evaluate it
 
-Use the optional rules block in the connector spec. The [invoice example](examples/invoice-rules.json) checks that the invoice ends approved, the agent checks the receipt before approval, it never attempts payment, and payment state stays unchanged.
+Use the optional rules block in the connector spec. The [invoice example](examples/invoice/rules.json) checks that the invoice ends approved, the agent checks the receipt before approval, it never attempts payment, and payment state stays unchanged.
 
 | Rule | What passes |
 | --- | --- |
@@ -240,7 +252,7 @@ Validate a connector against a test fixture before enrolling any Flagsmith ident
 
 ```powershell
 $env:AEGIS_CONNECTOR_URL = 'http://127.0.0.1:9000/run'
-python -m aegis connector-check examples/invoice-rules.json --case invoice-approval --strategy direct
+python -m aegis connector-check examples/invoice/rules.json --case invoice-approval --strategy direct
 ```
 
 The example spec assumes your agent endpoint implements that invoice fixture. Projects with custom grading logic can continue using the original response format and omit rules from their spec.
@@ -249,7 +261,7 @@ The example spec assumes your agent endpoint implements that invoice fixture. Pr
 
 Teams without an agent can use the FastAPI starter with an OpenAI-compatible tool-calling service. The default API base URL is Groq. Copy the starter settings from .env.example into .env and set AEGIS_CLOUD_MODEL to a tool-capable model available on your account. Put the corresponding API key in AEGIS_CLOUD_API_KEY. Use synthetic fixture data because the model provider receives the task, initial state and tool results.
 
-The [starter configuration](examples/invoice-starter.json) defines each task, its initial state and its mock tools. Each tool takes an empty object and can return fixed data or update fields in that fixture's state. The companion invoice rules spec owns the expected outcome. Use the same revision in both files and update it when changing the model, fixture, tools or grading rules.
+The [starter configuration](examples/invoice/starter.json) defines each task, its initial state and its mock tools. Each tool takes an empty object and can return fixed data or update fields in that fixture's state. The companion invoice rules spec owns the expected outcome. Use the same revision in both files and update it when changing the model, fixture, tools or grading rules.
 
 ```powershell
 uv run --extra ui --env-file .env python -m uvicorn aegis.starter:create_app --factory --host 127.0.0.1 --port 9000
@@ -259,7 +271,7 @@ In a second shell, run the connector check or use this endpoint in the live conn
 
 ```powershell
 $env:AEGIS_CONNECTOR_URL = 'http://127.0.0.1:9000/run'
-uv run python -m aegis connector-check examples/invoice-rules.json --case invoice-approval --strategy direct
+uv run python -m aegis connector-check examples/invoice/rules.json --case invoice-approval --strategy direct
 ```
 
 The connector check makes real inference requests. Provider usage limits and charges depend on your account. The local LM Studio and Ollama workflows still work with their own configuration.

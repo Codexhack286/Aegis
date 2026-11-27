@@ -21,7 +21,7 @@ def reply(calls=None, text=""):
 class ConnectorRulesTests(unittest.TestCase):
     def setUp(self):
         self.revision, _, self.rules = connector.load_spec(
-            Path(__file__).resolve().parents[1] / "examples" / "invoice-rules.json"
+            Path(__file__).resolve().parents[1] / "examples" / "invoice" / "rules.json"
         )
         self.result = {
             "revision": self.revision,

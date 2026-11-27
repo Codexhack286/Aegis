@@ -58,7 +58,7 @@ class FixtureTools:
 
 
 def create_app(config_path=None):
-    path = Path(config_path or os.environ.get("AEGIS_STARTER_CONFIG", "examples/invoice-starter.json"))
+    path = Path(config_path or os.environ.get("AEGIS_STARTER_CONFIG", "examples/invoice/starter.json"))
     config = StarterConfig.model_validate_json(path.read_text(encoding="utf-8"))
     base_url = os.environ.get("AEGIS_CLOUD_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
     parsed = urlsplit(base_url)
