@@ -141,7 +141,8 @@ def execute(args):
                 )
             except sqlite3.IntegrityError as error:
                 raise ValueError("Identity already in the ledger. Inspect its run before replaying.") from error
-        strategy = experiment.expose(identity) if experiment else args.strategy
+        flag = experiment.expose_flag(identity) if experiment else None
+        strategy = flag.value if flag is not None else args.strategy
         with db:
             db.execute("UPDATE runs SET strategy = ? WHERE identity = ?", (strategy, identity))
         if provider == "connector":
@@ -163,6 +164,8 @@ def execute(args):
 
             result = run_case(args.case, strategy, chat)
         result.update(identity=identity, mode=args.mode, model=args.model)
+        if flag is not None:
+            result["experiment_id"] = flag.experiment.id
         if provider:
             result["provider"] = provider
         if getattr(args, "manifest_id", None):

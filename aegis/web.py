@@ -4,9 +4,10 @@ import os
 from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import ClientDisconnect
@@ -50,26 +51,37 @@ def create_app(db_path=None):
     db_path = db_path or os.environ.get("AEGIS_DB", "aegis.sqlite3")
 
     @app.get("/api/workspace")
-    def workspace(mode: str = "offline", benchmark_only: bool = False):
+    def workspace(
+        mode: str = "offline",
+        benchmark_only: bool = False,
+        history: Literal["current", "session", "all"] | None = None,
+        run_id: Annotated[list[str] | None, Query()] = None,
+    ):
         if mode not in ("offline", "live"):
             return error_response("Choose offline or live.")
-        with closing(connect(db_path)) as db:
-            rows = [unpack(row) for row in db.execute(
-                "SELECT * FROM runs WHERE mode = ? ORDER BY rowid DESC", (mode,),
-            )]
-        if benchmark_only:
-            manifest_path = os.environ.get("AEGIS_MANIFEST")
-            if not manifest_path:
-                return error_response("Set AEGIS_MANIFEST to scope the workspace.")
+        scope = "current" if benchmark_only else history or ("current" if mode == "live" else "all")
+        identities = None if scope == "all" else set()
+        manifest_id = None
+        if scope == "current" and (manifest_path := os.environ.get("AEGIS_MANIFEST")):
             try:
-                manifest = benchmark.load(manifest_path)
-                manifest_id = benchmark.fingerprint(manifest)
-                identities = {entry["identity"] for entry in manifest["runs"]}
-                rows = [row for row in rows if row["identity"] in identities and (
-                    row["report"] is None or row["report"].get("manifest_id") == manifest_id
-                )]
+                selected_manifest = benchmark.load(manifest_path)
+                if selected_manifest["mode"] == mode:
+                    manifest = selected_manifest
+                    identities = {entry["identity"] for entry in manifest["runs"]}
+                    manifest_id = benchmark.fingerprint(manifest)
             except (OSError, ValueError, KeyError, TypeError):
                 return error_response("Could not read the configured benchmark manifest.")
+        elif scope == "session":
+            identities = set(run_id or [])
+
+        rows = []
+        if identities is None or identities:
+            with closing(connect(db_path)) as db:
+                rows = [unpack(row) for row in db.execute(
+                    "SELECT * FROM runs WHERE mode = ? ORDER BY rowid DESC", (mode,),
+                ) if identities is None or row["identity"] in identities]
+        if manifest_id is not None:
+            rows = [row for row in rows if row["report"] is None or row["report"].get("manifest_id") == manifest_id]
         recent = []
         for row in rows[:50]:
             report = row["report"] or {}
@@ -77,6 +89,7 @@ def create_app(db_path=None):
                 **{key: row[key] for key in ("identity", "case_id", "strategy", "status", "model")},
                 "provider": report.get("provider", "ollama" if row["mode"] == "live" else None),
                 "manifest_id": report.get("manifest_id"),
+                "experiment_id": report.get("experiment_id"),
                 "success": report.get("success"),
                 "latency_ms": report.get("latency_ms"),
             })

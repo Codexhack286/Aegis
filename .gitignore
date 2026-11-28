@@ -6,3 +6,4 @@ flagsmith.env
 *.sqlite3*
 node_modules/
 ui/dist/
+demo-runs/

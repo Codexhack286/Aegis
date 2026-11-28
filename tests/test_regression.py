@@ -41,6 +41,38 @@ class PortableCases(unittest.TestCase):
             self.assertEqual(endpoint(app, "/api/benchmark-review")(), {"review": None})
 
     @unittest.skipUnless(find_spec("fastapi"), "Requires the ui extra")
+    def test_live_workspace_requires_an_explicit_scope_for_saved_runs(self):
+        from aegis.benchmark import fingerprint
+        from aegis.web import create_app
+
+        manifest = {"version": 1, "mode": "live", "runs": [
+            {"identity": "current-run"}, {"identity": "old-run"},
+        ]}
+        report = run_case("password-reset", "direct", scripted("password-reset"))
+        with TemporaryDirectory() as directory, patch.dict("os.environ", {"AEGIS_MANIFEST": ""}) as env:
+            db_path = Path(directory) / "ledger.sqlite3"
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with closing(connect(db_path)) as db, db:
+                db.executemany("INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)", [
+                    (identity, "live", "password-reset", "direct", "test-model", "completed",
+                     json.dumps({**report, "manifest_id": manifest_id}))
+                    for identity, manifest_id in (
+                        ("current-run", fingerprint(manifest)), ("old-run", "different-batch"), ("standalone", None),
+                    )
+                ])
+            workspace = endpoint(create_app(db_path), "/api/workspace")
+            self.assertEqual(workspace("live")["runs"], [])
+            self.assertEqual(workspace("live")["arms"][0]["evaluated"], 0)
+            self.assertEqual(workspace("live", history="all")["run_count"], 3)
+            env["AEGIS_MANIFEST"] = str(manifest_path)
+            session = workspace("live", history="session", run_id=["standalone"])
+            self.assertEqual([run["identity"] for run in session["runs"]], ["standalone"])
+            current = workspace("live")
+            self.assertEqual([run["identity"] for run in current["runs"]], ["current-run"])
+            self.assertEqual(current["arms"][0]["evaluated"], 1)
+
+    @unittest.skipUnless(find_spec("fastapi"), "Requires the ui extra")
     def test_ledger_export_and_api_omit_free_text(self):
         from aegis.web import create_app
 

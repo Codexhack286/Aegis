@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -34,12 +35,13 @@ def smoke(args):
 
 
 def main():
+    default_db = os.environ.get("AEGIS_DB", "aegis.sqlite3")
     parser = argparse.ArgumentParser(description="Evaluate helpdesk agent strategies.")
     commands = parser.add_subparsers(dest="mode", required=True)
     for mode in ("offline", "live", "model-test"):
         command = commands.add_parser(mode)
         command.add_argument("--case", choices=CASES, default="password-reset")
-        command.add_argument("--db", default="aegis.sqlite3")
+        command.add_argument("--db", default=default_db)
         if mode == "live":
             command.add_argument("--identity", required=True)
             command.add_argument("--model", required=True)
@@ -61,7 +63,7 @@ def main():
     command.add_argument("--strategy", choices=CONNECTOR_STRATEGIES, required=True)
     command = commands.add_parser("case-export", help="Export sanitized helpdesk evidence from the ledger.")
     command.add_argument("identity")
-    command.add_argument("--db", default="aegis.sqlite3")
+    command.add_argument("--db", default=default_db)
     command = commands.add_parser("case-regrade", help="Evaluate a portable bundle offline.")
     command.add_argument("bundle", type=Path)
     command = commands.add_parser("case-compare", help="Run both strategies on isolated fixtures.")
@@ -90,7 +92,7 @@ def main():
     for name in ("benchmark-run", "benchmark-review", "benchmark-decision"):
         command = commands.add_parser(name)
         command.add_argument("manifest")
-        command.add_argument("--db", default="aegis.sqlite3")
+        command.add_argument("--db", default=default_db)
         if name == "benchmark-run":
             command.add_argument("--model-file", type=Path)
             command.add_argument("--progress", action="store_true", help="Print each completed identity to stderr.")

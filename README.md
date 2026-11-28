@@ -123,6 +123,36 @@ A live run saves its trace before submitting a success event. A status of event_
 
 
 
+## Run the live end-to-end demo
+
+Load Qwen2.5-3B-Instruct in LM Studio and start its local API (port 1234 by default). Use the exact model ID listed by the API. From the repo root, run:
+
+```powershell
+npm.cmd --prefix ui ci
+npm.cmd --prefix ui run build
+uv run --extra ui python -m examples.invoice.live_demo --model qwen2.5-3b-instruct --serve
+```
+
+The command starts the invoice connector, runs real inference, and saves a fresh session under `demo-runs/`. It shuts down the connector to check outage handling, then serves the dashboard on port 5010. Stop the dashboard with Ctrl+C. Use `--connector-port` or `--dashboard-port` if a port is already occupied. Omit `--serve` for a CLI-only run.
+
+| Show | What to look for |
+| --- | --- |
+| `retry-trace.json` | The first submission returns a simulated timeout. The retry leaves exactly one invoice, `INV-1`. |
+| **Review a comparison** → `comparison.json` | Both strategies run against fresh copies of the approval, mismatch, and retry fixtures. Aegis compares the final state and tool evidence. Repair turns are counted. A live run may finish without needing one. |
+| **Review a comparison** → `outage.json` | With the connector stopped, both trials lack evidence and Aegis reports **Insufficient evidence**. |
+
+The live comparison reports the observed verdict. Exit codes are 0 for a passing comparison and retry check, 1 for regression or a failed retry check, and 2 for insufficient evidence or a setup error. The expected outage report is saved separately.
+
+### Include Flagsmith assignment and attribution
+
+Point `.env` at a dedicated, running demo experiment with the `agent_strategy` flag (`direct` and `plan_validate`) and `task_success` metric. Use a fresh experiment if you plan to reconcile counts. Each invocation generates a new batch and submits real exposure and success events only when you opt in:
+
+```powershell
+uv run --extra ui --extra experiment python -m examples.invoice.live_demo --model qwen2.5-3b-instruct --flagsmith --serve
+```
+
+Open **Flagsmith live** to see the assigned runs in the demo ledger. Expand **Review your benchmark** to see coverage and rollout guards. Compare the expected counts in `flagsmith-review.json` with the observed Flagsmith counts. This small batch is a demonstration of assignment and evidence collection. To verify attribution, save the observed counts in the same format as `expected_flagsmith_counts` and pass that file to `benchmark-review --flagsmith-counts` with the demo manifest and ledger.
+
 ## Walk through the dashboard
 
 1. Open **Start** and select **Open scripted runs**. Choose **Routing recovery drill** and run both strategies.
@@ -153,6 +183,8 @@ FastAPI serves the compiled UI and exposes API docs at http://127.0.0.1:5000/doc
 Select **Routing recovery drill** and **Run both strategies** to bring up the trace comparison. Both scripts initially attempt to assign an invalid queue. The baseline script stops and the candidate script retries with the correct queue. The evidence view shows the first differing action and each final queue. This drill verifies the workflow and illustrates the release review experience. Use the **Flagsmith live** tab for measured runs after installing the experiment extra and configuring Flagsmith and Ollama.
 
 The dashboard compares a selected run with the most recent completed run from the other strategy on the same fixture in the visible history. Treat the comparison as individual trace evidence. The live summary reflects the local ledger. Reconcile exposure and conversion counts in Flagsmith before using those runs for a release decision.
+
+**Flagsmith live** shows the live benchmark selected through `AEGIS_MANIFEST`, or runs started from the current page session if no live benchmark is configured. Choose **All saved live runs** in **Run history** to browse past experiments.
 
 
 ## Benchmark and release review

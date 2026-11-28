@@ -5,7 +5,7 @@ import { CaseBundle, Comparison, ToolTrace } from '../components/Trace.jsx'
 import { cases, humanize, labels, ms, resultLabel } from '../presentation.js'
 
 export default function RunWorkspace({ mode }) {
-  const [data, setData] = useState(null)
+  const [workspace, setWorkspace] = useState(null)
   const [current, setCurrent] = useState(null)
   const [reference, setReference] = useState(null)
   const [fixture, setFixture] = useState(mode === 'offline' ? 'recovery-drill' : 'password-reset')
@@ -20,9 +20,21 @@ export default function RunWorkspace({ mode }) {
   const [review, setReview] = useState(null)
   const [reviewError, setReviewError] = useState('')
   const [batchOnly, setBatchOnly] = useState(true)
+  const [liveHistory, setLiveHistory] = useState('current')
+  const [sessionRuns, setSessionRuns] = useState([])
   const [failuresOnly, setFailuresOnly] = useState(false)
   const [search, setSearch] = useState('')
-  const scoped = batchOnly && review?.mode === mode
+  const hasBenchmark = review?.mode === mode
+  const liveScope = liveHistory === 'current' && !hasBenchmark ? 'session' : liveHistory
+  const params = new URLSearchParams({ mode })
+  if (mode === 'live') {
+    params.set('history', liveScope)
+    if (liveScope === 'session') sessionRuns.forEach(id => params.append('run_id', id))
+  } else if (batchOnly && hasBenchmark) {
+    params.set('benchmark_only', 'true')
+  }
+  const queryString = params.toString()
+  const data = workspace?.queryString === queryString ? workspace.payload : null
 
   useEffect(() => {
     let active = true
@@ -40,14 +52,14 @@ export default function RunWorkspace({ mode }) {
 
   useEffect(() => {
     let active = true
-    api(`/workspace?mode=${mode}&benchmark_only=${Boolean(scoped)}`).then(payload => {
+    api(`/workspace?${queryString}`).then(payload => {
       if (!active) return
-      setData(payload)
+      setWorkspace({ queryString, payload })
       select(previous => payload.runs.some(run => run.identity === previous)
         ? previous : payload.runs[0]?.identity ?? null)
     }).catch(error => { if (active) setError(error.message) })
     return () => { active = false }
-  }, [mode, epoch, scoped])
+  }, [queryString, epoch])
 
   const other = current?.report && data?.runs.find(run => run.case_id === current.case_id
     && run.model === current.model
@@ -88,7 +100,12 @@ export default function RunWorkspace({ mode }) {
       setFailuresOnly(false)
       setSearch('')
       select(result.identity)
-      if (mode === 'live') setIdentity('')
+      if (mode === 'live') {
+        setSessionRuns(previous => [result.identity, ...previous].slice(0, 50))
+        setLiveHistory('session')
+        setWorkspace(null)
+        setIdentity('')
+      }
     } catch (error) {
       setError(error.message)
     } finally {
@@ -97,11 +114,13 @@ export default function RunWorkspace({ mode }) {
     }
   }
 
-  const report = current?.identity === selected ? current.report : null
+  const selectedInScope = data?.runs.some(run => run.identity === selected)
+  const report = selectedInScope && current?.identity === selected ? current.report : null
   const query = search.trim().toLowerCase()
   const visibleRuns = data?.runs.filter(run =>
     (!failuresOnly || run.success === false) && [
       run.identity, run.case_id, cases[run.case_id], run.strategy, labels[run.strategy],
+      run.experiment_id?.toString(),
     ].some(value => value?.toLowerCase().includes(query))) ?? []
   return <>
     <div className="workspace-head">
@@ -169,7 +188,22 @@ export default function RunWorkspace({ mode }) {
         <section className="panel run-list">
           <div className="section-head"><h2>Run history</h2><span>{data?.run_count ?? '—'} total</span></div>
           <div className="history-controls">
-            <input type="search" aria-label="Search recent runs" placeholder="Search fixture, strategy or run ID"
+            {mode === 'live' && <label>Show runs from
+              <select value={liveScope} onChange={event => {
+                setLiveHistory(event.target.value)
+                setWorkspace(null)
+                setCurrent(null)
+                select(null)
+                setFailuresOnly(false)
+                setSearch('')
+                setError('')
+              }}>
+                {hasBenchmark && <option value="current">Configured benchmark</option>}
+                <option value="session">This page session</option>
+                <option value="all">All saved live runs</option>
+              </select>
+            </label>}
+            <input type="search" aria-label="Search recent runs" placeholder={mode === 'live' ? 'Search runs or experiment IDs' : 'Search fixture, strategy or run ID'}
               value={search} onChange={event => setSearch(event.target.value)} />
             <label><input type="checkbox" checked={failuresOnly} onChange={event => {
               setFailuresOnly(event.target.checked)
@@ -183,13 +217,20 @@ export default function RunWorkspace({ mode }) {
           </div>
           {visibleRuns.length ? <ul>{visibleRuns.map(run => <li key={run.identity}>
             <button type="button" aria-pressed={selected === run.identity} onClick={() => { setCurrent(null); select(run.identity); if (selected === run.identity) refresh(value => value + 1) }}>
-              <span><strong>{cases[run.case_id] || run.case_id}</strong><small>{labels[run.strategy] || 'Awaiting assignment'}</small></span>
+              <span>
+                <strong>{cases[run.case_id] || run.case_id}</strong>
+                <small>{labels[run.strategy] || 'Awaiting assignment'}</small>
+                {mode === 'live' && <small>{run.identity}{run.experiment_id != null && ` · Experiment ${run.experiment_id}`}</small>}
+              </span>
               <span className={`pill ${run.success ? 'ok' : run.success === false ? 'blocked' : ''}`}>{resultLabel(run.success)}</span>
             </button>
           </li>)}</ul> : <p className="empty">{!data ? 'Waiting for run history.' :
             query ? 'No recent runs match this search.' :
             failuresOnly ? 'No failures in the displayed history.' : mode === 'offline' ?
-              'Run a sample task to see its results here.' : 'Run a live task or execute a project benchmark to add results here.'}</p>}
+              'Run a sample task to see its results here.' : liveScope === 'current' ?
+                'The configured benchmark has no runs yet.' : liveScope === 'all' ?
+                  'No live runs are saved in this project ledger.' :
+                  'Run a live task to see it here. Choose All saved live runs to browse the ledger.'}</p>}
         </section>
 
         <section className="panel inspection">
@@ -198,6 +239,10 @@ export default function RunWorkspace({ mode }) {
             <div className="evidence-body">
               <p className="run-context">{cases[report.case] || report.case} · {labels[report.strategy]}</p>
               <dl className="states">
+                {mode === 'live' && <>
+                  <div><dt>Run identity</dt><dd>{current.identity}</dd></div>
+                  <div><dt>Flagsmith experiment ID</dt><dd>{report.experiment_id ?? 'Not recorded'}</dd></div>
+                </>}
                 {report.provider !== 'connector' && <>
                   <div><dt>Queue change</dt><dd>{report.before['T-1'].queue} → {report.after['T-1'].queue}</dd></div>
                   <div><dt>Expected queue</dt><dd>{report.expected_queue}</dd></div>
@@ -225,7 +270,7 @@ export default function RunWorkspace({ mode }) {
               {reference?.report && reference.identity === other && <Comparison current={current} reference={reference} />}
               <details className="raw"><summary>Full run record</summary><pre>{JSON.stringify(current, null, 2)}</pre></details>
             </div>
-          </> : <p className="empty">{current?.identity === selected && current
+          </> : <p className="empty">{selectedInScope && current?.identity === selected && current
             ? `No trace recorded. Ledger status: ${humanize(current.status)}.`
             : 'Select a run to inspect its tool calls and ticket state.'}</p>}
         </section>
@@ -233,10 +278,10 @@ export default function RunWorkspace({ mode }) {
       {(review?.mode === mode || reviewError) && <details className="panel project-review">
         <summary>Review your benchmark</summary>
         {reviewError ? <p className="alert" role="alert">{reviewError}</p> : <>
-          <label><input type="checkbox" checked={batchOnly} onChange={event => {
+          {mode === 'offline' && <label><input type="checkbox" checked={batchOnly} onChange={event => {
             setBatchOnly(event.target.checked)
-            setData(null)
-          }} /> Show only this benchmark in run history</label>
+            setWorkspace(null)
+          }} /> Show only this benchmark in run history</label>}
           <BenchmarkReview review={review} showAttribution />
         </>}
       </details>}

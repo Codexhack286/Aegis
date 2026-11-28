@@ -53,9 +53,12 @@ class Experiment:
         return flag
 
     def expose(self, identity):
+        return self.expose_flag(identity).value
+
+    def expose_flag(self, identity):
         flag = self.resolve(identity)
         self.client.track_exposure_event("agent_strategy", identifier=identity, value=flag.variant)
-        return flag.value
+        return flag
 
     def success(self, identity):
         self.client.track_event("task_success", identifier=identity)
