@@ -151,6 +151,7 @@ def create_app(config_path=None, *, chat=None):
             before=fixture.state, after=tools.state, tools=result["tools"],
             tokens=result["tokens"], summary=result["final_text"], terminal=result["terminal"],
             repair_turns=result["repair_turns"],
+            timing_ms=result["timing_ms"],
         )
 
     return create_connector_app(config.revision, run)

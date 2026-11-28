@@ -3,7 +3,7 @@
 from typing import Any, Callable, Literal
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, FiniteFloat, model_validator
 
 
 class RunRequest(BaseModel):
@@ -21,12 +21,19 @@ class ToolCall(BaseModel):
     result: Any = None
 
 
+class AgentTiming(BaseModel):
+    model: FiniteFloat = Field(ge=0)
+    tools: FiniteFloat = Field(ge=0)
+    orchestration: FiniteFloat = Field(ge=0)
+
+
 class RunEvidence(BaseModel):
     before: dict[str, Any] | None = None
     after: dict[str, Any] | None = None
     tools: list[ToolCall] = Field(default_factory=list)
     tokens: int | None = Field(default=None, ge=0)
     repair_turns: Literal[0, 1] | None = None
+    timing_ms: AgentTiming | None = None
     summary: str | None = None
     terminal: str = "finished"
     success: bool | None = None

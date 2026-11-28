@@ -1,6 +1,6 @@
 import json
 from copy import deepcopy
-from time import monotonic
+from time import perf_counter
 
 STRATEGIES = ("direct", "plan_validate")
 REPAIR_STRATEGY = "plan_validate_repair"
@@ -140,7 +140,8 @@ def ticket_checks(finished, queue, expected_queue, has_note, unrelated_unchanged
 
 
 def run_agent(messages, strategy, chat, schemas, tools, *, repair=None, available_tools=None):
-    start = monotonic()
+    start = perf_counter()
+    model_seconds = tool_seconds = 0.0
     budget = MAX_MODEL_CALLS
     model_calls = []
     final_text = ""
@@ -151,7 +152,12 @@ def run_agent(messages, strategy, chat, schemas, tools, *, repair=None, availabl
     repair_tool = None
 
     def query(tools):
-        response = chat(messages, tools)
+        nonlocal model_seconds
+        started = perf_counter()
+        try:
+            response = chat(messages, tools)
+        finally:
+            model_seconds += perf_counter() - started
         message = response["message"]
         model_calls.append({
             "message": message,
@@ -201,11 +207,13 @@ def run_agent(messages, strategy, chat, schemas, tools, *, repair=None, availabl
                         arguments = json.loads(arguments)
                     except ValueError:
                         pass
+                dispatch_started = perf_counter()
                 if repair_tool is not None and (name != repair_tool or len(calls) != 1):
                     status, result = "blocked", {"error": "The repair turn permits only one call to its scoped tool."}
                     tools.trace.append({"tool": name, "arguments": arguments, "status": status, "result": result})
                 else:
                     status, result = tools.call(name, arguments, prevalidate=candidate)
+                tool_seconds += perf_counter() - dispatch_started
                 feedback = {
                     "role": "tool", "tool_name": name, "content": json.dumps(result),
                 }
@@ -224,13 +232,19 @@ def run_agent(messages, strategy, chat, schemas, tools, *, repair=None, availabl
                 break
     except (OSError, RuntimeError, ValueError, TypeError, KeyError, AttributeError) as error:
         terminal = f"model_error:{type(error).__name__}"
+    agent_seconds = perf_counter() - start
     invalid = sum(call["status"] == "invalid" for call in tools.trace)
     blocked = sum(call["status"] == "blocked" for call in tools.trace)
     counts = [call[key] for call in model_calls for key in ("input_tokens", "output_tokens")]
     return {
         "terminal": terminal, "final_text": final_text,
         "invalid_calls": invalid, "blocked_calls": blocked,
-        "latency_ms": round((monotonic() - start) * 1000, 2),
+        "latency_ms": round(agent_seconds * 1000, 2),
+        "timing_ms": {
+            "model": round(model_seconds * 1000, 3),
+            "tools": round(tool_seconds * 1000, 3),
+            "orchestration": round((agent_seconds - model_seconds - tool_seconds) * 1000, 3),
+        },
         "tokens": sum(counts) if counts and all(type(value) is int for value in counts) else None,
         "tools": tools.trace, "model_calls": model_calls, "repair_turns": repair_turns,
     }

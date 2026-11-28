@@ -233,7 +233,11 @@ class InvoiceConnector(unittest.TestCase):
                         self.assertEqual(comparison["arms"], ["plan_validate", repair])
                         self.assertEqual(comparison["verdict"], "pass")
                         self.assertEqual(comparison["cases"][0]["outcomes"][repair][0]["repair_turns"], 1)
-                        self.assertIn("Median latency", regression.markdown(comparison))
+                        trial = comparison["cases"][0]["outcomes"][repair][0]
+                        self.assertEqual(set(trial["timing_ms"]), {"model", "tools", "orchestration", "evaluation"})
+                        self.assertTrue(all(value >= 0 for value in trial["timing_ms"].values()))
+                        self.assertIn("| End-to-end | Model | Tools | Orchestration | Evaluation |",
+                                      regression.markdown(comparison))
                 self.assertEqual(report["repair_turns"], turns)
                 self.assertIs(report["success"], expected)
                 if case == "invoice-retry":

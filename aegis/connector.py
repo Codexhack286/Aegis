@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from time import monotonic
+from time import perf_counter
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -102,7 +102,7 @@ def evaluate_rules(rule, before, after, tools):
 def run(case, strategy, identity, revision, rule=None):
     payload = {"version": 1, "case": case, "strategy": strategy, "identity": identity, "revision": revision}
     request = Request(endpoint(), json.dumps(payload).encode(), {"Content-Type": "application/json"})
-    start = monotonic()
+    start = perf_counter()
     with urlopen(request, timeout=60) as response:
         body = response.read(1_048_577)
     if len(body) > 1_048_576:
@@ -129,11 +129,21 @@ def run(case, strategy, identity, revision, rule=None):
     terminal = result.get("terminal", "finished")
     if not isinstance(terminal, str) or not terminal.strip():
         raise ValueError("Connector terminal status must be a nonempty string.")
+    timing = result.get("timing_ms")
+    phases = ("model", "tools", "orchestration")
+    if timing is not None and (
+        not isinstance(timing, dict) or any(
+            type(timing.get(phase)) not in (int, float)
+            or not 0 <= timing[phase] < float("inf")
+            for phase in phases
+        )
+    ):
+        raise ValueError("Connector timing_ms must contain finite nonnegative model, tools and orchestration durations.")
+    report_timing = {phase: timing[phase] for phase in phases} if timing is not None else {}
     report = {
         "case": case, "strategy": strategy, "terminal": terminal,
         "invalid_calls": sum(item["status"] == "invalid" for item in tools),
         "blocked_calls": sum(item["status"] == "blocked" for item in tools),
-        "latency_ms": round((monotonic() - start) * 1000, 2),
         "tokens": tokens, "final_text": result.get("summary"),
         "before": result.get("before"), "after": result.get("after"), "tools": tools,
     }
@@ -143,8 +153,13 @@ def run(case, strategy, identity, revision, rule=None):
         report.update(success=result["success"] and not result["forbidden_mutation"],
                       forbidden_mutation=result["forbidden_mutation"])
     else:
+        evaluation_started = perf_counter()
         checks = evaluate_rules(rule, report["before"], report["after"], tools)
         report.update(checks=checks, success=terminal == "finished" and all(check["passed"] for check in checks),
                       forbidden_mutation=any(check["kind"] == "unchanged_state" and not check["passed"]
                                              for check in checks))
+        report_timing["evaluation"] = round((perf_counter() - evaluation_started) * 1000, 3)
+    report["latency_ms"] = round((perf_counter() - start) * 1000, 2)
+    if report_timing:
+        report["timing_ms"] = report_timing
     return report

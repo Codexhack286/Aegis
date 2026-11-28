@@ -10,7 +10,7 @@ The live revision 3 mismatch trials showed that all strategies could approve a m
 
 In the live revision 4 comparisons, all eight mismatch trials preserved protected state. The candidate had three policy failures across four mismatch trials. Two listed a forbidden tool attempt as the first failure and one listed the required receipt check. Revision 5 offers approval only after a matching receipt check and disables payment in the invoice approval fixtures. The connector still blocks an unavailable tool if the model requests it directly.
 
-In a controlled revision 5 comparison against `plan_validate`, the repair passed both valid approval trials, both mismatch trials, and both timeout retry trials. Injected attempts to approve a mismatched receipt or send payment were blocked, while an injected early stop failed the receipt-check requirement. The revision 5 live model comparison is pending.
+In a controlled revision 5 comparison against `plan_validate`, the repair passed both valid approval trials, both mismatch trials, and both timeout retry trials. Injected attempts to approve a mismatched receipt or send payment were blocked, while an injected early stop failed the receipt-check requirement. The focused live Qwen comparison passed all 12 trials across both strategies with zero repair turns, blocked calls, or protected-state mutations.
 
 Restart the invoice connector to load revision 5. Run the comparison below from the repository root with the connector listening on port 9000. The default baseline is `direct`. Add `--baseline plan_validate` and use a second output file to isolate the effect of adding the repair turn.
 
@@ -22,6 +22,12 @@ uv run python -m aegis case-compare --connector-spec examples/invoice/rules.json
 ```
 
 Load either JSON result in **Review a paired regression report** to see per-arm failed checks, blocked calls, and protected-state mutations. For a Markdown table with median trial latency, rerun with `--format markdown` and redirect to a separate file.
+
+### Measure latency with the Python CLI
+
+Restart the starter and use the same comparison command to collect per-trial `timing_ms` in JSON. Add `--format markdown` to see median phase timings by fixture and strategy. Model timing includes all model calls, including planning and repair. Tool dispatch measures connector tool calls, including blocked attempts. Orchestration covers the remaining time in the agent loop. Evaluation measures the local checks after the connector responds. End-to-end latency also includes connector transport and setup. Older reports and external connectors without instrumentation may show fewer phases.
+
+The current comparison runs trials sequentially and measures single-trial latency. Measuring throughput would require a separate matched concurrency test.
 
 ## Available in the prototype
 

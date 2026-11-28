@@ -172,6 +172,7 @@ def connector_trial(case, strategy, revision, rule):
         "blocked_calls": report.get("blocked_calls"),
         "forbidden_mutation": report["forbidden_mutation"],
         "latency_ms": report.get("latency_ms"),
+        "timing_ms": report.get("timing_ms"),
         "repair_turns": report.get("repair_turns"),
     }, report["before"]
 
@@ -214,12 +215,22 @@ def markdown(comparison):
             if notes:
                 lines.append(f"\n- `{row['case']}` / `{strategy}`. {'. '.join(notes)}.")
     if comparison["source"] == "connector":
-        lines.extend(["", "| Fixture | Strategy | Median latency (ms) | Repair turns |", "| --- | --- | ---: | ---: |"])
+        lines.extend([
+            "", "Durations are medians in milliseconds over trials reporting each phase.",
+            "Model timing includes the provider request and response. End-to-end timing also includes connector overhead.",
+            "", "| Fixture | Strategy | End-to-end | Model | Tools | Orchestration | Evaluation | Repair turns |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ])
         for row in comparison["cases"]:
             for strategy in arms:
                 outcomes = row["outcomes"][strategy]
                 latency = [run["latency_ms"] for run in outcomes if run.get("latency_ms") is not None]
                 repairs = [run["repair_turns"] for run in outcomes if run.get("repair_turns") is not None]
+                phase_values = []
+                for phase in ("model", "tools", "orchestration", "evaluation"):
+                    values = [(run.get("timing_ms") or {}).get(phase) for run in outcomes]
+                    measured = [value for value in values if value is not None]
+                    phase_values.append(f"{median(measured):.3f}" if measured else "-")
                 lines.append(f"| {row['case']} | {strategy} | {median(latency) if latency else '-'} "
-                             f"| {sum(repairs) if repairs else '-'} |")
+                             f"| {' | '.join(phase_values)} | {sum(repairs) if repairs else '-'} |")
     return "\n".join(lines)
