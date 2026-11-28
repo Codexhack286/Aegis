@@ -11,7 +11,7 @@ from aegis import connector, regression
 from aegis.core import run_case
 from aegis.runner import connect, scripted
 
-SAMPLES = Path("benchmarks/qwen-measured-01")
+SAMPLES = Path("docs/history/qwen-measured-01")
 
 
 def endpoint(app, path):
@@ -27,6 +27,18 @@ class PortableCases(unittest.TestCase):
         del bundle["evidence"]["successful_tools"]
         with self.assertRaisesRegex(ValueError, "Insufficient evidence"):
             regression.regrade(bundle)
+
+    @unittest.skipUnless(find_spec("fastapi"), "Requires the ui extra")
+    def test_new_workspace_starts_without_historical_results(self):
+        from aegis.web import create_app
+
+        with TemporaryDirectory() as directory, patch.dict("os.environ", {"AEGIS_MANIFEST": ""}):
+            db_path = Path(directory) / "new-ledger.sqlite3"
+            app = create_app(db_path)
+            workspace = endpoint(app, "/api/workspace")()
+            self.assertEqual(workspace["runs"], [])
+            self.assertEqual(workspace["run_count"], 0)
+            self.assertEqual(endpoint(app, "/api/benchmark-review")(), {"review": None})
 
     @unittest.skipUnless(find_spec("fastapi"), "Requires the ui extra")
     def test_ledger_export_and_api_omit_free_text(self):

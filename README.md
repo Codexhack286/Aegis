@@ -7,9 +7,9 @@ A helpdesk agent can say “I routed the ticket” while leaving it in the wrong
 | Directory | Contents |
 | --- | --- |
 | `aegis/` | Python backend, CLI, benchmark engine, connector, and SDK. |
-| `ui/src/` | React entry point, dashboard workspace, and components for review and trace inspection. |
+| `ui/src/pages/` | Overview, run workspace, and guide. Shared review and trace components live in `ui/src/components/`. |
 | `examples/invoice/` | Invoice starter fixture and its matching evaluator rules. |
-| `benchmarks/qwen-measured-01/` | Frozen manifest, reconciled Flagsmith counts, and saved rollout decision. |
+| `docs/` | [Engineering notes](docs/NEXT_PHASE.md), [historical evidence](docs/EVIDENCE.md), and its raw files in `docs/history/`. |
 | `deploy/flagsmith/` | Docker Compose setup for a local Flagsmith experiment. |
 | `tests/` | Python regression tests. |
 
@@ -65,30 +65,9 @@ Choose a minimum sample size and acceptable latency/token overhead with the team
 
 Planning and validation change together in this experiment. The comparison estimates the effect of the combined strategy. Isolating the contribution of planning would require another arm. A tiny demo cohort can establish that the system works and legitimately return Hold.
 
-## Measured Qwen benchmark
+## Project evidence
 
-Flagsmith assigned 40 synthetic helpdesk runs across five fixtures. Both strategies used Qwen2.5 3B Instruct in LM Studio. The experiment was closed in Development after its totals matched the Aegis ledger.
-
-| Measure | Direct tool calling | Plan and validate |
-| --- | ---: | ---: |
-| Flagsmith exposures | 19 | 21 |
-| Successful runs and matching Flagsmith conversions | 19 (100%) | 15 (71.4%) |
-| Median latency | 1,781 ms | 2,578 ms |
-| Median tokens | 1,549 | 2,001 |
-
-**Release decision in Aegis: Hold the candidate and keep direct as the baseline.** The fixture-adjusted change was −30 percentage points against a target of +5. In all three failed password-reset runs, the candidate reached the expected queue but assigned the ticket before looking up routing rules. Trace `qwen-measured-01-0005` shows this sequence. The three other failures came from unclear requests that the candidate left unassigned. This result applies to the tested model, strategies, and repeated synthetic fixtures.
-
-- [Frozen benchmark manifest](benchmarks/qwen-measured-01/manifest.json)
-- [Reconciled Flagsmith counts](benchmarks/qwen-measured-01/flagsmith-counts.json)
-- [Saved decision and review snapshot](benchmarks/qwen-measured-01/decision.json)
-
-## Verified and remaining work
-
-- Verified Flagsmith Cloud and self-hosted assignment and event attribution. The measured Qwen benchmark ran on Cloud. The self-hosted check paired a synthetic event batch with a successful local Qwen task.
-- The Python SDK and connector rules passed simulated integration checks. A real invoice run through the cloud starter remains to be verified.
-- For the demo, show the Flagsmith assignment, the password-reset trace with assignment before lookup, and the resulting Hold decision. A clean-clone rehearsal and a recorded demo remain.
-
-[Official rules and submission requirements](https://www.wemakedevs.org/hackathons/flagsmith/rules) · [Hackathon tracks](https://www.wemakedevs.org/hackathons/flagsmith) · [Self-hosted experimentation](https://docs.flagsmith.com/experimentation/self-hosting)
+See the [engineering evidence archive](docs/EVIDENCE.md) for the measured benchmark, earlier invoice reports, and verification status.
 
 ## Run the prototype
 
@@ -126,17 +105,6 @@ uv run --extra experiment --env-file .env python -m aegis flagsmith-smoke --batc
 
 Compare the printed counts with the local experiment results. Use a fresh batch prefix for each smoke run. [Flagsmith self-hosting guide](https://docs.flagsmith.com/experimentation/self-hosting)
 
-#### Verified local smoke test
-
-The `selfhost-01` batch enrolled 20 identities per arm and submitted synthetic conversions for 9 control and 11 candidate identities. A subsequent live password-reset run, `selfhost-qwen-01`, used Qwen2.5 3B Instruct via LM Studio. Flagsmith assigned it to `direct`, and Aegis verified the routing and note. The run took 5,906 ms and reported 1,500 tokens.
-
-| Strategy | Local Flagsmith exposures | Local Flagsmith conversions |
-| --- | ---: | ---: |
-| `direct` | 21 | 10 |
-| `plan_validate` | 20 | 11 |
-
-The dashboard totals matched the expected counts after the live run. This verifies local assignment, model execution, and event attribution. The totals include synthetic events from the smoke batch. Use a separate experiment to compare strategies.
-
 ### Test either Flagsmith instance
 
 With the dedicated smoke experiment running, confirm that `.env` selects the matching instance and Development SDK key. Choose a fresh batch prefix for every smoke run. Compare the printed assignments and success submissions with the Flagsmith dashboard after refreshing the results.
@@ -155,22 +123,32 @@ A live run saves its trace before submitting a success event. A status of event_
 
 
 
+## Walk through the dashboard
+
+1. Open **Start** and select **Open scripted runs**. Choose **Routing recovery drill** and run both strategies.
+2. In **Run evidence**, inspect the invalid tool call and the first divergence. Preview and regrade a case bundle, then download it for a teammate.
+3. Select **Flagsmith live** to review runs from your own experiment. For custom tasks, start at **Connect your agent** on the Start page.
+4. Once you generate a paired comparison, open **Review your comparison** from the connector guide or the live workspace and choose your JSON file.
+
+The scripted walkthrough needs no model server or Flagsmith key.
+
 ## Run the dashboard
 
-Use Python 3.11 or later and Node.js 22.12+ or 24+. From the repository root, install the UI dependencies and start FastAPI with Uvicorn.
+Use Python 3.11 or later and Node.js 22.12+ or 24+. From the repository root, build the UI and start FastAPI with Uvicorn.
 
 ```powershell
-uv run --python 3.12 --extra ui --extra experiment --env-file .env python -m uvicorn aegis.web:create_app --factory --host 127.0.0.1 --port 5000
+npm --prefix ui ci
+npm --prefix ui run build
+uv run --extra ui python -m uvicorn aegis.web:create_app --factory --host 127.0.0.1 --port 5000
 ```
 
-In a second shell, install and start the Vite UI.
+Open http://127.0.0.1:5000. For UI development, run Vite in a second shell and open http://localhost:5173.
 
 ```powershell
-npm --prefix ui install
 npm --prefix ui run dev
 ```
 
-Open http://localhost:5173. For a single local server, run npm --prefix ui run build and open http://127.0.0.1:5000. FastAPI serves the compiled UI, and its API docs are available at http://127.0.0.1:5000/docs. Set AEGIS_DB before startup to point at a different SQLite ledger.
+FastAPI serves the compiled UI and exposes API docs at http://127.0.0.1:5000/docs. For Flagsmith live runs, add `--extra experiment` to the `uv run` command and configure `.env`. Use `AEGIS_DB` to point the CLI and dashboard at the same project-specific SQLite ledger.
 
 Select **Routing recovery drill** and **Run both strategies** to bring up the trace comparison. Both scripts initially attempt to assign an invalid queue. The baseline script stops and the candidate script retries with the correct queue. The evidence view shows the first differing action and each final queue. This drill verifies the workflow and illustrates the release review experience. Use the **Flagsmith live** tab for measured runs after installing the experiment extra and configuring Flagsmith and Ollama.
 

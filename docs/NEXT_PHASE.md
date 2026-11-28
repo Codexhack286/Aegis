@@ -12,6 +12,8 @@ In the live revision 4 comparisons, all eight mismatch trials preserved protecte
 
 In a controlled revision 5 comparison against `plan_validate`, the repair passed both valid approval trials, both mismatch trials, and both timeout retry trials. Injected attempts to approve a mismatched receipt or send payment were blocked, while an injected early stop failed the receipt-check requirement. The focused live Qwen comparison passed all 12 trials across both strategies with zero repair turns, blocked calls, or protected-state mutations.
 
+A repeat run over the local HTTP connector passed all 12 trials and returned exit code 0. Both strategies went 2/2 on approval, receipt mismatch, and retry. The standalone retry check recorded an initial timeout, a successful retry, and exactly one invoice (`INV-1`). Zero repair turns were used in the live comparison. With the connector stopped and its endpoint still configured, both trial results were unavailable and the CLI reported insufficient evidence with exit code 2.
+
 Restart the invoice connector to load revision 5. Run the comparison below from the repository root with the connector listening on port 9000. The default baseline is `direct`. Add `--baseline plan_validate` and use a second output file to isolate the effect of adding the repair turn.
 
 ```powershell
@@ -21,7 +23,7 @@ uv run python -m aegis case-compare --connector-spec examples/invoice/rules.json
     --case invoice-receipt-mismatch --case invoice-retry > repair-regression.json
 ```
 
-Load either JSON result in **Review a paired regression report** to see per-arm failed checks, blocked calls, and protected-state mutations. For a Markdown table with median trial latency, rerun with `--format markdown` and redirect to a separate file.
+Load either JSON result in **Review your comparison** under Flagsmith live to see per-arm failed checks, blocked calls, and protected-state mutations. For a Markdown table with median trial latency, rerun with `--format markdown` and redirect to a separate file.
 
 ### Measure latency with the Python CLI
 
@@ -34,15 +36,15 @@ The current comparison runs trials sequentially and measures single-trial latenc
 Select a built-in run in the dashboard and choose **Preview and regrade bundle** to see the first failing check and download the projected evidence. The bundle contains queue values, rule-relevant facts and known successful tool names. The saved examples came from Qwen runs `qwen-measured-01-0003` and `qwen-measured-01-0005`.
 
 ```powershell
-uv run python -m aegis case-regrade benchmarks/qwen-measured-01/password-reset-pass.case.json
-uv run python -m aegis case-regrade benchmarks/qwen-measured-01/password-reset-fail.case.json
+uv run python -m aegis case-regrade docs/history/qwen-measured-01/password-reset-pass.case.json
+uv run python -m aegis case-regrade docs/history/qwen-measured-01/password-reset-fail.case.json
 uv run python -m aegis case-export qwen-measured-01-0005 > password-reset.case.json
 uv run python -m aegis case-compare --case password-reset --repeats 2 --format markdown
 ```
 
 `case-regrade` and `case-compare` return 0 for pass, 1 for a failed check or observed regression, and 2 for insufficient evidence. `case-compare` uses scripted helpdesk strategies by default. Pass `--model qwen2.5-3b-instruct` for fresh runs through LM Studio. JSON output includes each trial's portable evidence. The paired comparison is a diagnostic gate on these fixtures. Release decisions still use the measured experiment.
 
-The invoice starter now includes normal submission, simulated timeout with idempotent retry, and receipt approval. Tests exercise their connector endpoint with controlled responses. Live invoice inference and validation with another team's workflow are pending. Portable export is currently limited to the built-in helpdesk policy.
+The invoice starter includes normal submission, simulated timeout with idempotent retry, and receipt approval. Automated tests exercise the connector endpoint with controlled responses. Live inference over HTTP has been verified for approval, receipt mismatch, and retry. Validation with another team's workflow remains pending. Portable export currently supports the built-in helpdesk policy.
 
 ### Run paired checks against a connector
 
@@ -52,7 +54,7 @@ Start the connector, set `AEGIS_CONNECTOR_URL` to its run endpoint, and select f
 uv run --env-file .env python -m aegis case-compare --connector-spec examples/invoice/rules.json --case invoice-retry --case invoice-approval --repeats 2 > regression.json
 ```
 
-Open **Review a paired regression report** and choose the file. The dashboard reads it locally. Connector reports contain verdicts and rule categories. They omit raw project state, prompts and tool arguments. A connector outage or differing starting state yields insufficient evidence. An observed candidate mutation of protected state triggers a regression. Use `--format markdown` for a pull request summary.
+Open **Review your comparison** under Flagsmith live and choose the file. The dashboard reads it locally. Connector reports contain verdicts and rule categories. They omit raw project state, prompts and tool arguments. A connector outage or differing starting state yields insufficient evidence. An observed candidate mutation of protected state triggers a regression. Use `--format markdown` for a pull request summary.
 
 ### Realistic regression replays
 
@@ -64,7 +66,7 @@ The invoice starter reproduces the lost-acknowledgement pattern with a fixed syn
 
 An engineer changes an agent prompt, model or tool policy. Before increasing the rollout, they need to know which previously working tasks broke, whether the agent changed anything it should have left alone, and how a teammate can reproduce the failure. Build for the engineer reviewing that change. Measure whether Aegis changes their release decision or shortens their investigation.
 
-The existing Qwen experiment gives us a concrete starting point. Direct succeeded on 19/19 runs and plan-and-validate on 15/21. In three password-reset failures the candidate reached the expected queue but assigned the ticket before consulting routing policy. In three unclear cases it left the ticket unassigned. These are two different bugs with different fixes. The 40 runs covered five synthetic fixtures on one model. Keep that scope visible whenever showing the result. [Recorded decision](benchmarks/qwen-measured-01/decision.json)
+The existing Qwen experiment gives us a concrete starting point. Direct succeeded on 19/19 runs and plan-and-validate on 15/21. In three password-reset failures the candidate reached the expected queue but assigned the ticket before consulting routing policy. In three unclear cases it left the ticket unassigned. These are two different bugs with different fixes. The 40 runs covered five synthetic fixtures on one model. Keep that scope visible whenever showing the result. [Recorded decision](history/qwen-measured-01/decision.json)
 
 Practitioners report that agents can claim completion without achieving the intended state, that different valid tool paths can reach the same outcome, and that noisy environments complicate diagnosis. This motivates independent state checks, explicit policy predicates and isolated repeated trials. Whether teams will adopt Aegis for this work is still an open product question. [Anthropic’s agent evaluation guidance](https://www.anthropic.com/research/demystifying-evals-for-ai-agents)
 

@@ -5,6 +5,11 @@ const verdicts = {
   regression: 'Regression',
   insufficient_evidence: 'Insufficient evidence',
 }
+const explanations = {
+  pass: 'Aegis detected no regression on the tasks covered by this comparison.',
+  regression: 'The candidate lost passes on at least one task or changed protected state. Inspect the failed checks below.',
+  insufficient_evidence: 'Aegis could not make a reliable comparison. Check for unavailable trials, different starting states, or tasks where both strategies failed.',
+}
 const sources = { connector: 'Connector', lmstudio: 'LM Studio', scripted: 'Scripted' }
 const defaultArms = ['direct', 'plan_validate']
 const armLabels = { direct: 'Direct', plan_validate: 'Plan and validate', plan_validate_repair: 'Plan, validate and repair' }
@@ -80,7 +85,10 @@ export default function RegressionReview() {
     setBusy(true)
     try {
       if (file.size > 4 * 1024 * 1024) throw new Error('Choose a JSON report under 4 MiB.')
-      setReport(parseReport(await file.text()))
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le' :
+        bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8'
+      setReport(parseReport(new TextDecoder(encoding).decode(bytes)))
     } catch (failure) {
       setError(failure instanceof SyntaxError ? 'Choose a valid JSON report from case-compare.' : failure.message)
     } finally {
@@ -88,11 +96,16 @@ export default function RegressionReview() {
     }
   }
 
-  return <details className="panel benchmark">
-    <summary>Review a paired regression report</summary>
-    <p><label>Load a case-compare JSON report <input type="file" accept=".json,application/json" disabled={busy} onChange={loadReport} /></label></p>
+  return <section className="panel benchmark report-upload">
+    <div className="section-head"><h2>Import your comparison</h2></div>
+    <div className="evidence-body">
+    <label>Choose the JSON file saved by <code>case-compare</code>
+      <input type="file" accept=".json,application/json" disabled={busy} onChange={loadReport} />
+    </label>
+    {!report && !error && <p className="empty">{busy ? 'Reading comparison…' : 'The file is read in your browser. Need to create one?'} {!busy && <a href="#connect">See connector setup</a>}</p>}
     {error && <p role="alert">{error}</p>}
     {report && <>
+      <p className="comparison-explanation">{explanations[report.verdict]}</p>
       <p role="status"><strong>{verdicts[report.verdict]}</strong> · {sources[report.source]} · {report.distinct_cases} fixtures · {report.repeats} trials per arm and fixture</p>
       <div style={{ overflowX: 'auto' }}><table className="fixture-table">
         <thead><tr><th>Fixture</th>{report.arms.map(arm => <th key={arm}>{armLabels[arm]}</th>)}<th>Result</th></tr></thead>
@@ -105,5 +118,6 @@ export default function RegressionReview() {
         </tr>)}</tbody>
       </table></div>
     </>}
-  </details>
+    </div>
+  </section>
 }
